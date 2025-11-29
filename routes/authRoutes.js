@@ -91,15 +91,25 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    // Update last login
+    user.lastLogin = new Date();
+    user.loginMethod = "email";
+    await user.save();
+
     res.json({
       success: true,
       message: "Login successful!",
       user: {
         id: user._id,
         username: user.username,
+        fullName: user.fullName,
         email: user.email,
         role: user.role,
-        profilePicture: user.profilePicture
+        profilePicture: user.profilePicture,
+        accountStatus: user.accountStatus,
+        lastLogin: user.lastLogin,
+        loginMethod: user.loginMethod,
+        createdAt: user.createdAt
       }
     });
   } catch (error) {
@@ -144,6 +154,8 @@ router.post("/google-login", async (req, res) => {
       if (picture && !user.profilePicture) {
         user.profilePicture = picture;
       }
+      user.lastLogin = new Date();
+      user.loginMethod = "google";
       await user.save();
 
       // User exists, allow login
@@ -152,9 +164,14 @@ router.post("/google-login", async (req, res) => {
         user: {
           id: user._id,
           username: user.username,
+          fullName: user.fullName,
           email: user.email,
           role: user.role,
-          profilePicture: user.profilePicture
+          profilePicture: user.profilePicture,
+          accountStatus: user.accountStatus,
+          lastLogin: user.lastLogin,
+          loginMethod: user.loginMethod,
+          createdAt: user.createdAt
         }
       });
     } else {
@@ -165,7 +182,9 @@ router.post("/google-login", async (req, res) => {
         googleId,
         profilePicture: picture,
         role: "student",
-        isVerified: true
+        isVerified: true,
+        lastLogin: new Date(),
+        loginMethod: "google"
       });
       await user.save();
 
@@ -175,9 +194,14 @@ router.post("/google-login", async (req, res) => {
         user: {
           id: user._id,
           username: user.username,
+          fullName: user.fullName,
           email: user.email,
           role: user.role,
-          profilePicture: user.profilePicture
+          profilePicture: user.profilePicture,
+          accountStatus: user.accountStatus,
+          lastLogin: user.lastLogin,
+          loginMethod: user.loginMethod,
+          createdAt: user.createdAt
         }
       });
     }

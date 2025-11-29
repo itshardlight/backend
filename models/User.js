@@ -28,6 +28,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  fullName: {
+    type: String,
+    default: ""
+  },
   role: {
     type: String,
     enum: ["admin", "teacher", "student", "parent", "fee_department"],
@@ -35,7 +39,27 @@ const userSchema = new mongoose.Schema({
   },
   isVerified: {
     type: Boolean,
-    default: true
+    default: false
+  },
+  verificationOTP: {
+    type: String
+  },
+  otpExpires: {
+    type: Date
+  },
+  accountStatus: {
+    type: String,
+    enum: ["active", "inactive", "suspended"],
+    default: "active"
+  },
+  lastLogin: {
+    type: Date,
+    default: null
+  },
+  loginMethod: {
+    type: String,
+    enum: ["email", "google"],
+    default: "email"
   },
   resetPasswordToken: {
     type: String

@@ -41,7 +41,7 @@ router.get("/profile/:userId", async (req, res) => {
 router.put("/profile/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
-    const { username, email } = req.body;
+    const { username, email, fullName, profilePicture } = req.body;
 
     if (!username || !email) {
       return res.status(400).json({ 
@@ -77,6 +77,8 @@ router.put("/profile/:userId", async (req, res) => {
     // Update user
     user.username = username;
     user.email = email;
+    if (fullName !== undefined) user.fullName = fullName;
+    if (profilePicture !== undefined) user.profilePicture = profilePicture;
     await user.save();
 
     res.json({
@@ -85,9 +87,14 @@ router.put("/profile/:userId", async (req, res) => {
       user: {
         id: user._id,
         username: user.username,
+        fullName: user.fullName,
         email: user.email,
         role: user.role,
-        profilePicture: user.profilePicture
+        profilePicture: user.profilePicture,
+        accountStatus: user.accountStatus,
+        lastLogin: user.lastLogin,
+        loginMethod: user.loginMethod,
+        createdAt: user.createdAt
       }
     });
   } catch (error) {
