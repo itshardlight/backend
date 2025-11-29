@@ -98,7 +98,8 @@ router.post("/login", async (req, res) => {
         id: user._id,
         username: user.username,
         email: user.email,
-        role: user.role
+        role: user.role,
+        profilePicture: user.profilePicture
       }
     });
   } catch (error) {
@@ -129,18 +130,21 @@ router.post("/google-login", async (req, res) => {
     });
 
     const payload = ticket.getPayload();
-    const { sub: googleId, email } = payload;
+    const { sub: googleId, email, picture } = payload;
 
     // Check if user exists
     let user = await User.findOne({ $or: [{ googleId }, { email }] });
 
     if (user) {
-      // Update googleId if not set
+      // Update googleId and profile picture if not set
       if (!user.googleId) {
         user.googleId = googleId;
         user.isVerified = true;
-        await user.save();
       }
+      if (picture && !user.profilePicture) {
+        user.profilePicture = picture;
+      }
+      await user.save();
 
       // User exists, allow login
       return res.json({
@@ -149,7 +153,8 @@ router.post("/google-login", async (req, res) => {
           id: user._id,
           username: user.username,
           email: user.email,
-          role: user.role
+          role: user.role,
+          profilePicture: user.profilePicture
         }
       });
     } else {
@@ -158,6 +163,7 @@ router.post("/google-login", async (req, res) => {
         username: email.split('@')[0] + '_' + Date.now(),
         email,
         googleId,
+        profilePicture: picture,
         role: "student",
         isVerified: true
       });
@@ -170,7 +176,8 @@ router.post("/google-login", async (req, res) => {
           id: user._id,
           username: user.username,
           email: user.email,
-          role: user.role
+          role: user.role,
+          profilePicture: user.profilePicture
         }
       });
     }

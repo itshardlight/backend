@@ -24,6 +24,10 @@ const userSchema = new mongoose.Schema({
     sparse: true,
     unique: true
   },
+  profilePicture: {
+    type: String,
+    default: null
+  },
   role: {
     type: String,
     enum: ["admin", "teacher", "student", "parent", "fee_department"],
