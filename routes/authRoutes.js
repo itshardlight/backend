@@ -1,11 +1,17 @@
 import express from "express";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
 import User from "../models/User.js";
 import { sendPasswordResetEmail } from "../utils/emailService.js";
 
 const router = express.Router();
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Helper function to generate JWT token
+const generateToken = (userId) => {
+  return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '24h' });
+};
 
 // Register route (default role: student)
 router.post("/register", async (req, res) => {
@@ -96,9 +102,13 @@ router.post("/login", async (req, res) => {
     user.loginMethod = "email";
     await user.save();
 
+    // Generate JWT token
+    const token = generateToken(user._id);
+
     res.json({
       success: true,
       message: "Login successful!",
+      token,
       user: {
         id: user._id,
         username: user.username,
@@ -159,8 +169,11 @@ router.post("/google-login", async (req, res) => {
       await user.save();
 
       // User exists, allow login
+      const token = generateToken(user._id);
+      
       return res.json({
         success: true,
+        token,
         user: {
           id: user._id,
           username: user.username,
@@ -188,9 +201,12 @@ router.post("/google-login", async (req, res) => {
       });
       await user.save();
 
+      const token = generateToken(user._id);
+      
       return res.json({
         success: true,
         message: "Account created successfully!",
+        token,
         user: {
           id: user._id,
           username: user.username,
