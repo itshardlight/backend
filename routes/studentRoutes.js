@@ -1,6 +1,6 @@
 import express from "express";
 import Student from "../models/Student.js";
-import { authenticateToken } from "../middleware/auth.js";
+import { authenticateToken, requireRole } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -132,8 +132,8 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// Get all students with pagination and filtering (requires authentication)
-router.get("/", authenticateToken, async (req, res) => {
+// Get all students with pagination and filtering (admin only)
+router.get("/", authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
@@ -182,8 +182,8 @@ router.get("/", authenticateToken, async (req, res) => {
   }
 });
 
-// Get student by ID
-router.get("/:id", authenticateToken, async (req, res) => {
+// Get student by ID (admin only)
+router.get("/:id", authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const student = await Student.findById(req.params.id).select('-__v');
     
@@ -208,8 +208,8 @@ router.get("/:id", authenticateToken, async (req, res) => {
   }
 });
 
-// Create new student
-router.post("/", authenticateToken, async (req, res) => {
+// Create new student (admin only)
+router.post("/", authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     // Check if roll number already exists
     const existingRollNumber = await Student.findOne({ rollNumber: req.body.rollNumber });
@@ -257,8 +257,8 @@ router.post("/", authenticateToken, async (req, res) => {
   }
 });
 
-// Update student
-router.put("/:id", authenticateToken, async (req, res) => {
+// Update student (admin only)
+router.put("/:id", authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const studentId = req.params.id;
     
@@ -328,8 +328,8 @@ router.put("/:id", authenticateToken, async (req, res) => {
   }
 });
 
-// Delete student
-router.delete("/:id", authenticateToken, async (req, res) => {
+// Delete student (admin only)
+router.delete("/:id", authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const student = await Student.findByIdAndDelete(req.params.id);
     
@@ -354,8 +354,8 @@ router.delete("/:id", authenticateToken, async (req, res) => {
   }
 });
 
-// Get student statistics
-router.get("/stats/overview", authenticateToken, async (req, res) => {
+// Get student statistics (admin only)
+router.get("/stats/overview", authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const totalStudents = await Student.countDocuments();
     const activeStudents = await Student.countDocuments({ status: 'active' });
