@@ -20,6 +20,12 @@ connectDB();
 app.use(cors());
 app.use(express.json());
 
+// Add request logging for debugging
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
@@ -27,6 +33,33 @@ app.use("/api/users", userRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/profiles", profileRoutes);
 app.use("/api/attendance", attendanceRoutes);
+
+// Debug route to list all available routes
+app.get("/api/debug/routes", (req, res) => {
+  const routes = [];
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      routes.push({
+        path: middleware.route.path,
+        methods: Object.keys(middleware.route.methods)
+      });
+    } else if (middleware.name === 'router') {
+      middleware.handle.stack.forEach((handler) => {
+        if (handler.route) {
+          routes.push({
+            path: handler.route.path,
+            methods: Object.keys(handler.route.methods)
+          });
+        }
+      });
+    }
+  });
+  res.json({ 
+    message: "Available routes",
+    routes: routes,
+    attendanceRoutesLoaded: !!attendanceRoutes
+  });
+});
 
 app.get("/", (req, res) => {
   res.json({ message: "Backend API is running" });

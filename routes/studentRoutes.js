@@ -98,16 +98,29 @@ router.post("/generate-rollnumber", async (req, res) => {
 router.get("/list/public", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 100; // Increased limit for attendance
     const skip = (page - 1) * limit;
     
-    const students = await Student.find({ status: 'active' })
-      .sort({ createdAt: -1 })
+    // Build filter object
+    const filter = { status: 'active' };
+    if (req.query.class) filter.class = req.query.class;
+    if (req.query.section) filter.section = req.query.section;
+    if (req.query.search) {
+      filter.$or = [
+        { firstName: { $regex: req.query.search, $options: 'i' } },
+        { lastName: { $regex: req.query.search, $options: 'i' } },
+        { rollNumber: { $regex: req.query.search, $options: 'i' } },
+        { email: { $regex: req.query.search, $options: 'i' } }
+      ];
+    }
+    
+    const students = await Student.find(filter)
+      .sort({ rollNumber: 1 }) // Sort by roll number for attendance
       .skip(skip)
       .limit(limit)
       .select('firstName lastName rollNumber class section email phone admissionDate status');
 
-    const total = await Student.countDocuments({ status: 'active' });
+    const total = await Student.countDocuments(filter);
 
     res.json({
       success: true,
