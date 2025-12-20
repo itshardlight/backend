@@ -1,5 +1,6 @@
 import express from "express";
 import Student from "../models/Student.js";
+import User from "../models/User.js";
 import { authenticateToken, requireRole } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -174,22 +175,70 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    // Check if email already exists
-    const existingEmail = await Student.findOne({ email: req.body.email });
-    if (existingEmail) {
+    // Check if email already exists in Student or User collections
+    const existingStudentEmail = await Student.findOne({ email: req.body.email });
+    if (existingStudentEmail) {
       return res.status(400).json({
         success: false,
-        message: "Email already exists"
+        message: "Email already exists in student records"
       });
     }
 
-    const student = new Student(req.body);
+    const existingUserEmail = await User.findOne({ email: req.body.email });
+    if (existingUserEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Email already exists in user accounts"
+      });
+    }
+
+    // Create User account first
+    const username = `${req.body.firstName.toLowerCase()}_${req.body.rollNumber}`;
+    const defaultPassword = `${req.body.firstName.toLowerCase()}@${req.body.rollNumber}`;
+    
+    const user = new User({
+      username,
+      email: req.body.email,
+      password: defaultPassword,
+      fullName: `${req.body.firstName} ${req.body.lastName}`,
+      role: "student",
+      isVerified: true,
+      requirePasswordChange: true // Force password change on first login
+    });
+
+    await user.save();
+
+    // Create Student record with reference to User
+    const studentData = {
+      ...req.body,
+      userId: user._id // Link student to user account
+    };
+
+    const student = new Student(studentData);
     await student.save();
+
+    // Update user with student reference (optional, for easier queries)
+    user.fullName = student.fullName;
+    await user.save();
 
     res.status(201).json({
       success: true,
-      message: "Student registered successfully",
-      data: student
+      message: "Student registered successfully with user account created",
+      data: {
+        student: student,
+        user: {
+          id: user._id,
+          username: user.username,
+          email: user.email,
+          role: user.role,
+          requirePasswordChange: user.requirePasswordChange
+        },
+        loginCredentials: {
+          username: username,
+          temporaryPassword: defaultPassword,
+          note: "Student must change password on first login"
+        }
+      }
     });
   } catch (error) {
     console.error("Error creating student:", error);
@@ -299,22 +348,70 @@ router.post("/", authenticateToken, requireRole(['admin']), async (req, res) => 
       });
     }
 
-    // Check if email already exists
-    const existingEmail = await Student.findOne({ email: req.body.email });
-    if (existingEmail) {
+    // Check if email already exists in Student or User collections
+    const existingStudentEmail = await Student.findOne({ email: req.body.email });
+    if (existingStudentEmail) {
       return res.status(400).json({
         success: false,
-        message: "Email already exists"
+        message: "Email already exists in student records"
       });
     }
 
-    const student = new Student(req.body);
+    const existingUserEmail = await User.findOne({ email: req.body.email });
+    if (existingUserEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Email already exists in user accounts"
+      });
+    }
+
+    // Create User account first
+    const username = `${req.body.firstName.toLowerCase()}_${req.body.rollNumber}`;
+    const defaultPassword = `${req.body.firstName.toLowerCase()}@${req.body.rollNumber}`;
+    
+    const user = new User({
+      username,
+      email: req.body.email,
+      password: defaultPassword,
+      fullName: `${req.body.firstName} ${req.body.lastName}`,
+      role: "student",
+      isVerified: true,
+      requirePasswordChange: true // Force password change on first login
+    });
+
+    await user.save();
+
+    // Create Student record with reference to User
+    const studentData = {
+      ...req.body,
+      userId: user._id // Link student to user account
+    };
+
+    const student = new Student(studentData);
     await student.save();
+
+    // Update user with student reference (optional, for easier queries)
+    user.fullName = student.fullName;
+    await user.save();
 
     res.status(201).json({
       success: true,
-      message: "Student registered successfully",
-      data: student
+      message: "Student registered successfully with user account created",
+      data: {
+        student: student,
+        user: {
+          id: user._id,
+          username: user.username,
+          email: user.email,
+          role: user.role,
+          requirePasswordChange: user.requirePasswordChange
+        },
+        loginCredentials: {
+          username: username,
+          temporaryPassword: defaultPassword,
+          note: "Student must change password on first login"
+        }
+      }
     });
   } catch (error) {
     console.error("Error creating student:", error);
@@ -369,22 +466,39 @@ router.put("/:id", authenticateToken, requireRole(['admin']), async (req, res) =
       }
     }
 
-    const student = await Student.findByIdAndUpdate(
-      studentId,
-      req.body,
-      { new: true, runValidators: true }
-    ).select('-__v');
-
-    if (!student) {
+    // Get the current student to find associated user
+    const currentStudent = await Student.findById(studentId);
+    if (!currentStudent) {
       return res.status(404).json({
         success: false,
         message: "Student not found"
       });
     }
 
+    // Update student record
+    const student = await Student.findByIdAndUpdate(
+      studentId,
+      req.body,
+      { new: true, runValidators: true }
+    ).select('-__v');
+
+    // Update associated user account if it exists
+    if (currentStudent.userId) {
+      const userUpdateData = {};
+      
+      if (req.body.email) userUpdateData.email = req.body.email;
+      if (req.body.firstName || req.body.lastName) {
+        userUpdateData.fullName = `${req.body.firstName || currentStudent.firstName} ${req.body.lastName || currentStudent.lastName}`;
+      }
+      
+      if (Object.keys(userUpdateData).length > 0) {
+        await User.findByIdAndUpdate(currentStudent.userId, userUpdateData);
+      }
+    }
+
     res.json({
       success: true,
-      message: "Student updated successfully",
+      message: "Student updated successfully (user account also synchronized)",
       data: student
     });
   } catch (error) {
@@ -410,7 +524,7 @@ router.put("/:id", authenticateToken, requireRole(['admin']), async (req, res) =
 // Delete student (admin only)
 router.delete("/:id", authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
-    const student = await Student.findByIdAndDelete(req.params.id);
+    const student = await Student.findById(req.params.id);
     
     if (!student) {
       return res.status(404).json({
@@ -419,9 +533,17 @@ router.delete("/:id", authenticateToken, requireRole(['admin']), async (req, res
       });
     }
 
+    // Delete associated user account if it exists
+    if (student.userId) {
+      await User.findByIdAndDelete(student.userId);
+    }
+
+    // Delete the student record
+    await Student.findByIdAndDelete(req.params.id);
+
     res.json({
       success: true,
-      message: "Student deleted successfully"
+      message: "Student and associated user account deleted successfully"
     });
   } catch (error) {
     console.error("Error deleting student:", error);
