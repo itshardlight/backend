@@ -47,6 +47,52 @@ router.get("/stats/public", async (req, res) => {
   }
 });
 
+// Public route to generate unique roll number
+router.post("/generate-rollnumber", async (req, res) => {
+  try {
+    const { class: studentClass, section } = req.body;
+    
+    if (!studentClass || !section) {
+      return res.status(400).json({
+        success: false,
+        message: "Class and section are required"
+      });
+    }
+
+    let rollNumber;
+    let attempts = 0;
+    const maxAttempts = 10;
+    
+    do {
+      const randomNum = Math.floor(100 + Math.random() * 900);
+      rollNumber = `${studentClass}${section}${randomNum}`;
+      attempts++;
+    } while (
+      await Student.findOne({ rollNumber }) && 
+      attempts < maxAttempts
+    );
+    
+    if (attempts >= maxAttempts) {
+      return res.status(500).json({
+        success: false,
+        message: "Unable to generate unique roll number. Please try again."
+      });
+    }
+
+    res.json({
+      success: true,
+      data: { rollNumber }
+    });
+  } catch (error) {
+    console.error("Error generating roll number:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error generating roll number",
+      error: error.message
+    });
+  }
+});
+
 // Public route to get basic student list (limited info)
 router.get("/list/public", async (req, res) => {
   try {
@@ -86,6 +132,39 @@ router.get("/list/public", async (req, res) => {
 // Public route to create student (for registration form)
 router.post("/register", async (req, res) => {
   try {
+    // Auto-generate roll number if not provided or if it conflicts
+    if (!req.body.rollNumber || req.body.rollNumber.includes('AUTO')) {
+      const { class: studentClass, section } = req.body;
+      if (studentClass && section) {
+        let rollNumber;
+        let attempts = 0;
+        const maxAttempts = 10;
+        
+        do {
+          const randomNum = Math.floor(100 + Math.random() * 900);
+          rollNumber = `${studentClass}${section}${randomNum}`;
+          attempts++;
+        } while (
+          await Student.findOne({ rollNumber }) && 
+          attempts < maxAttempts
+        );
+        
+        if (attempts >= maxAttempts) {
+          return res.status(500).json({
+            success: false,
+            message: "Unable to generate unique roll number. Please try again."
+          });
+        }
+        
+        req.body.rollNumber = rollNumber;
+        
+        // Auto-generate email if not provided
+        if (!req.body.email && req.body.firstName) {
+          req.body.email = `${req.body.firstName.toLowerCase()}${rollNumber}@gmail.com`;
+        }
+      }
+    }
+
     // Check if roll number already exists
     const existingRollNumber = await Student.findOne({ rollNumber: req.body.rollNumber });
     if (existingRollNumber) {

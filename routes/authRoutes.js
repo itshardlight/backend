@@ -119,8 +119,10 @@ router.post("/login", async (req, res) => {
         accountStatus: user.accountStatus,
         lastLogin: user.lastLogin,
         loginMethod: user.loginMethod,
+        requirePasswordChange: user.requirePasswordChange,
         createdAt: user.createdAt
-      }
+      },
+      requirePasswordChange: user.requirePasswordChange
     });
   } catch (error) {
     console.error("❌ Login error:", error);
@@ -321,6 +323,68 @@ router.post("/reset-password/:token", async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: "Server error" 
+    });
+  }
+});
+
+// Change password route (for authenticated users)
+router.post("/change-password", async (req, res) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Access token required"
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.userId);
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid token"
+      });
+    }
+
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password and new password are required"
+      });
+    }
+
+    // Check current password (skip for first-time password change)
+    if (!user.requirePasswordChange) {
+      const isMatch = await user.comparePassword(currentPassword);
+      if (!isMatch) {
+        return res.status(400).json({
+          success: false,
+          message: "Current password is incorrect"
+        });
+      }
+    }
+
+    // Update password
+    user.password = newPassword;
+    user.requirePasswordChange = false;
+    user.lastLogin = new Date();
+    await user.save();
+
+    res.json({
+      success: true,
+      message: "Password changed successfully!"
+    });
+  } catch (error) {
+    console.error("❌ Change password error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
     });
   }
 });
