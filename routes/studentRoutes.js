@@ -2,8 +2,41 @@ import express from "express";
 import Student from "../models/Student.js";
 import User from "../models/User.js";
 import { authenticateToken, requireRole } from "../middleware/auth.js";
+import { sendStudentCredentialsEmail } from "../utils/emailService.js";
 
 const router = express.Router();
+
+// Helper function to send email notification to parent
+const sendParentNotification = async (student, loginCredentials) => {
+  let emailSent = false;
+  let emailError = null;
+  
+  if (student.parentEmail) {
+    try {
+      const emailResult = await sendStudentCredentialsEmail(
+        student.parentEmail,
+        {
+          firstName: student.firstName,
+          lastName: student.lastName,
+          rollNumber: student.rollNumber,
+          class: student.class,
+          section: student.section,
+          email: student.email
+        },
+        loginCredentials
+      );
+      emailSent = emailResult.success;
+      if (!emailResult.success) {
+        emailError = emailResult.error;
+      }
+    } catch (error) {
+      console.error("Error sending email notification:", error);
+      emailError = error.message;
+    }
+  }
+  
+  return { emailSent, emailError };
+};
 
 // Test route (no authentication required)
 router.get("/test", async (req, res) => {
@@ -234,6 +267,13 @@ router.post("/register", async (req, res) => {
     user.fullName = student.fullName;
     await user.save();
 
+    // Send email notification to parent
+    const loginCredentials = {
+      username: username,
+      temporaryPassword: defaultPassword
+    };
+    const { emailSent, emailError } = await sendParentNotification(student, loginCredentials);
+
     res.status(201).json({
       success: true,
       message: "Student registered successfully with user account created",
@@ -250,6 +290,11 @@ router.post("/register", async (req, res) => {
           username: username,
           temporaryPassword: defaultPassword,
           note: "Student must change password on first login"
+        },
+        emailNotification: {
+          sent: emailSent,
+          parentEmail: student.parentEmail || null,
+          error: emailError
         }
       }
     });
@@ -407,6 +452,13 @@ router.post("/", authenticateToken, requireRole(['admin']), async (req, res) => 
     user.fullName = student.fullName;
     await user.save();
 
+    // Send email notification to parent
+    const loginCredentials = {
+      username: username,
+      temporaryPassword: defaultPassword
+    };
+    const { emailSent, emailError } = await sendParentNotification(student, loginCredentials);
+
     res.status(201).json({
       success: true,
       message: "Student registered successfully with user account created",
@@ -423,6 +475,11 @@ router.post("/", authenticateToken, requireRole(['admin']), async (req, res) => 
           username: username,
           temporaryPassword: defaultPassword,
           note: "Student must change password on first login"
+        },
+        emailNotification: {
+          sent: emailSent,
+          parentEmail: student.parentEmail || null,
+          error: emailError
         }
       }
     });

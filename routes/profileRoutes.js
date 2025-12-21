@@ -227,6 +227,61 @@ router.get("/me/profile", authenticateToken, async (req, res) => {
       profile = await Profile.findOne({ "parentInfo.parentEmail": req.user.email })
         .populate('userId', 'username email role lastLogin')
         .populate('achievements.addedBy', 'username fullName');
+    } else if (userRole === "student") {
+      // For students, find their profile by userId
+      profile = await Profile.findOne({ userId })
+        .populate('userId', 'username email role lastLogin')
+        .populate('achievements.addedBy', 'username fullName');
+      
+      // If no profile exists, try to find by matching student data
+      if (!profile) {
+        const user = await User.findById(userId);
+        if (user) {
+          // Try to find profile by email match in Student collection
+          const Student = (await import("../models/Student.js")).default;
+          const student = await Student.findOne({ email: user.email });
+          if (student) {
+            // Create a profile from student data
+            profile = {
+              _id: student._id,
+              userId: user,
+              firstName: student.firstName,
+              lastName: student.lastName,
+              dateOfBirth: student.dateOfBirth,
+              gender: student.gender,
+              bloodGroup: student.bloodGroup,
+              phone: student.phone,
+              address: {
+                street: student.address,
+                city: student.city,
+                state: student.state,
+                zipCode: student.zipCode
+              },
+              academic: {
+                currentGrade: student.class,
+                section: student.section,
+                rollNumber: student.rollNumber,
+                admissionDate: student.admissionDate,
+                previousSchool: student.previousSchool
+              },
+              parentInfo: {
+                fatherName: student.parentName,
+                motherName: student.parentName,
+                guardianName: student.parentName,
+                parentPhone: student.parentPhone,
+                parentEmail: student.parentEmail,
+                emergencyContact: student.emergencyContact
+              },
+              medicalInfo: {
+                conditions: student.medicalConditions
+              },
+              achievements: [],
+              fullName: `${student.firstName} ${student.lastName}`,
+              currentClass: `${student.class}-${student.section}`
+            };
+          }
+        }
+      }
     } else {
       // For other roles, find their own profile
       profile = await Profile.findOne({ userId })
@@ -242,7 +297,7 @@ router.get("/me/profile", authenticateToken, async (req, res) => {
     }
 
     // Apply role-based filtering (same logic as above)
-    let filteredProfile = profile.toObject();
+    let filteredProfile = profile.toObject ? profile.toObject() : profile;
 
     switch (userRole) {
       case "student":
@@ -379,7 +434,50 @@ router.post("/:id/achievements", authenticateToken, requireRole(["student"]), as
     const { title, description, date, category } = req.body;
     const userId = req.user._id;
 
-    const profile = await Profile.findById(id);
+    let profile = await Profile.findById(id);
+    
+    // If no profile found, try to find by student data
+    if (!profile) {
+      const Student = (await import("../models/Student.js")).default;
+      const student = await Student.findById(id);
+      if (student && student.userId && student.userId.toString() === userId.toString()) {
+        // Create a basic profile structure for adding achievements
+        profile = await Profile.findOneAndUpdate(
+          { userId: userId },
+          {
+            userId: userId,
+            firstName: student.firstName,
+            lastName: student.lastName,
+            dateOfBirth: student.dateOfBirth,
+            gender: student.gender,
+            bloodGroup: student.bloodGroup,
+            phone: student.phone,
+            address: {
+              street: student.address,
+              city: student.city,
+              state: student.state,
+              zipCode: student.zipCode
+            },
+            academic: {
+              currentGrade: student.class,
+              section: student.section,
+              rollNumber: student.rollNumber,
+              admissionDate: student.admissionDate
+            },
+            parentInfo: {
+              fatherName: student.parentName,
+              parentPhone: student.parentPhone,
+              parentEmail: student.parentEmail,
+              emergencyContact: student.emergencyContact
+            },
+            achievements: [],
+            createdBy: userId
+          },
+          { upsert: true, new: true }
+        );
+      }
+    }
+
     if (!profile) {
       return res.status(404).json({
         success: false,
@@ -406,7 +504,7 @@ router.post("/:id/achievements", authenticateToken, requireRole(["student"]), as
     profile.achievements.push(achievement);
     await profile.save();
 
-    const updatedProfile = await Profile.findById(id)
+    const updatedProfile = await Profile.findById(profile._id)
       .populate('achievements.addedBy', 'username fullName');
 
     res.json({
