@@ -521,6 +521,131 @@ router.post("/:id/achievements", authenticateToken, requireRole(["student"]), as
   }
 });
 
+// Update achievement (students only - their own achievements)
+router.put("/:id/achievements/:achievementId", authenticateToken, requireRole(["student"]), async (req, res) => {
+  try {
+    const { id, achievementId } = req.params;
+    const { title, description, date, category } = req.body;
+    const userId = req.user._id;
+
+    const profile = await Profile.findById(id);
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        message: "Profile not found"
+      });
+    }
+
+    // Students can only edit achievements on their own profile
+    if (profile.userId.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied"
+      });
+    }
+
+    // Find the achievement using find instead of id method
+    const achievement = profile.achievements.find(a => a._id.toString() === achievementId);
+    if (!achievement) {
+      return res.status(404).json({
+        success: false,
+        message: "Achievement not found"
+      });
+    }
+
+    // Students can only edit their own achievements
+    if (achievement.addedBy.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only edit your own achievements"
+      });
+    }
+
+    // Update achievement fields
+    achievement.title = title;
+    achievement.description = description;
+    achievement.date = date || achievement.date;
+    achievement.category = category;
+
+    await profile.save();
+
+    const updatedProfile = await Profile.findById(profile._id)
+      .populate('achievements.addedBy', 'username fullName');
+
+    res.json({
+      success: true,
+      message: "Achievement updated successfully",
+      achievements: updatedProfile.achievements
+    });
+  } catch (error) {
+    console.error("Update achievement error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update achievement"
+    });
+  }
+});
+
+// Delete achievement (students only - their own achievements)
+router.delete("/:id/achievements/:achievementId", authenticateToken, requireRole(["student"]), async (req, res) => {
+  try {
+    const { id, achievementId } = req.params;
+    const userId = req.user._id;
+
+    const profile = await Profile.findById(id);
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        message: "Profile not found"
+      });
+    }
+
+    // Students can only delete achievements from their own profile
+    if (profile.userId.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied"
+      });
+    }
+
+    // Find the achievement using find instead of id method
+    const achievement = profile.achievements.find(a => a._id.toString() === achievementId);
+    if (!achievement) {
+      return res.status(404).json({
+        success: false,
+        message: "Achievement not found"
+      });
+    }
+
+    // Students can only delete their own achievements
+    if (achievement.addedBy.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only delete your own achievements"
+      });
+    }
+
+    // Remove the achievement using pull with the ObjectId
+    profile.achievements.pull({ _id: achievementId });
+    await profile.save();
+
+    const updatedProfile = await Profile.findById(profile._id)
+      .populate('achievements.addedBy', 'username fullName');
+
+    res.json({
+      success: true,
+      message: "Achievement deleted successfully",
+      achievements: updatedProfile.achievements
+    });
+  } catch (error) {
+    console.error("Delete achievement error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to delete achievement"
+    });
+  }
+});
+
 // Get all profiles (admin and teachers only)
 router.get("/", authenticateToken, requireRole(["admin", "teacher"]), async (req, res) => {
   try {
