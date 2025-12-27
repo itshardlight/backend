@@ -8,6 +8,7 @@ import userRoutes from "./routes/userRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
+import resultRoutes from "./routes/resultRoutes.js";
 
 dotenv.config();
 
@@ -33,32 +34,11 @@ app.use("/api/users", userRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/profiles", profileRoutes);
 app.use("/api/attendance", attendanceRoutes);
+app.use("/api/results", resultRoutes);
 
-// Debug route to list all available routes
-app.get("/api/debug/routes", (req, res) => {
-  const routes = [];
-  app._router.stack.forEach((middleware) => {
-    if (middleware.route) {
-      routes.push({
-        path: middleware.route.path,
-        methods: Object.keys(middleware.route.methods)
-      });
-    } else if (middleware.name === 'router') {
-      middleware.handle.stack.forEach((handler) => {
-        if (handler.route) {
-          routes.push({
-            path: handler.route.path,
-            methods: Object.keys(handler.route.methods)
-          });
-        }
-      });
-    }
-  });
-  res.json({ 
-    message: "Available routes",
-    routes: routes,
-    attendanceRoutesLoaded: !!attendanceRoutes
-  });
+// Health check
+app.get("/api/health", (req, res) => {
+  res.json({ success: true, message: "Server is running" });
 });
 
 app.get("/", (req, res) => {
