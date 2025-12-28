@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Result from '../models/Result.js';
 import Student from '../models/Student.js';
 import User from '../models/User.js';
@@ -98,15 +99,43 @@ router.get('/student/:studentId', authenticateToken, async (req, res) => {
     const { studentId } = req.params;
     const { academicYear, examType } = req.query;
 
+    // Check if the provided ID is a Profile ID or Student ID
+    let actualStudentId = studentId;
+    
+    // First, try to find if it's a Student ID
+    const student = await Student.findById(studentId).catch(() => null);
+    if (!student) {
+      // If not found as Student, check if it's a Profile ID
+      const Profile = mongoose.model('Profile');
+      const profileRecord = await Profile.findById(studentId).catch(() => null);
+      if (profileRecord) {
+        // Find the corresponding Student using the same userId
+        const correspondingStudent = await Student.findOne({ userId: profileRecord.userId });
+        if (correspondingStudent) {
+          actualStudentId = correspondingStudent._id;
+        } else {
+          return res.status(404).json({
+            success: false,
+            message: 'No corresponding student record found for this profile'
+          });
+        }
+      } else {
+        return res.status(404).json({
+          success: false,
+          message: 'Student or profile not found'
+        });
+      }
+    }
+
     // Build filter
-    const filter = { studentId };
+    const filter = { studentId: actualStudentId };
     if (academicYear) filter.academicYear = academicYear;
     if (examType) filter.examType = examType;
 
     // Students can only view their own results
     if (req.user.role === 'student') {
-      const student = await Student.findOne({ userId: req.user._id });
-      if (!student || student._id.toString() !== studentId) {
+      const userStudent = await Student.findOne({ userId: req.user._id });
+      if (!userStudent || userStudent._id.toString() !== actualStudentId.toString()) {
         return res.status(403).json({ 
           success: false, 
           message: 'Access denied. You can only view your own results.' 
