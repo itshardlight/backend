@@ -64,7 +64,7 @@ const studentSchema = new mongoose.Schema({
   class: {
     type: String,
     required: true,
-    enum: ["9", "10", "11", "12"]
+    enum: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
   },
   section: {
     type: String,
