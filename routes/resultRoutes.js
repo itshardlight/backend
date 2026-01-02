@@ -93,6 +93,64 @@ router.get('/', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
   }
 });
 
+// GET /api/results/:id - Get single result by ID
+router.get('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid result ID format'
+      });
+    }
+
+    const result = await Result.findById(id)
+      .populate('studentId', 'firstName lastName rollNumber class section')
+      .populate('enteredBy', 'fullName')
+      .populate('verifiedBy', 'fullName');
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        message: 'Result not found'
+      });
+    }
+
+    // Check permissions
+    if (req.user.role === 'student') {
+      const userStudent = await Student.findOne({ userId: req.user._id });
+      if (!userStudent || userStudent._id.toString() !== result.studentId._id.toString()) {
+        return res.status(403).json({ 
+          success: false, 
+          message: 'Access denied. You can only view your own results.' 
+        });
+      }
+    }
+
+    // Teachers can only view results they entered (unless admin)
+    if (req.user.role === 'teacher' && result.enteredBy._id.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You can only view results you created.'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error fetching result:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching result', 
+      error: error.message 
+    });
+  }
+});
+
 // GET /api/results/student/:studentId - Get results for specific student
 router.get('/student/:studentId', authenticateToken, async (req, res) => {
   try {
@@ -230,12 +288,15 @@ router.get('/bulk-entry/:class/:section', authenticateToken, requireTeacherOrAdm
     });
 
     // Add result status to each student
-    const studentsWithStatus = students.map(student => ({
-      ...student.toObject(),
-      hasResult: !!existingResultsMap[student._id.toString()],
-      resultStatus: existingResultsMap[student._id.toString()]?.status || null,
-      resultId: existingResultsMap[student._id.toString()]?._id || null
-    }));
+    const studentsWithStatus = students.map(student => {
+      const existingResult = existingResultsMap[student._id.toString()];
+      return {
+        ...student.toObject(),
+        hasResult: !!existingResult,
+        resultStatus: existingResult?.status || null,
+        existingResultId: existingResult?._id || null
+      };
+    });
 
     res.json({
       success: true,
