@@ -9,6 +9,7 @@ import studentRoutes from "./routes/studentRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
 import resultRoutes from "./routes/resultRoutes.js";
+import feeRoutes from "./routes/feeRoutes.js";
 
 dotenv.config();
 
@@ -35,6 +36,7 @@ app.use("/api/students", studentRoutes);
 app.use("/api/profiles", profileRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/results", resultRoutes);
+app.use("/api/fees", feeRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
