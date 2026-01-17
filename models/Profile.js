@@ -90,15 +90,42 @@ const profileSchema = new mongoose.Schema({
   // Fee Information
   feeInfo: {
     totalFee: { type: Number, default: 0 },
+    tuitionFee: { type: Number, default: 0 },
+    admissionFee: { type: Number, default: 0 },
+    examFee: { type: Number, default: 0 },
+    libraryFee: { type: Number, default: 0 },
+    sportsFee: { type: Number, default: 0 },
+    otherFees: { type: Number, default: 0 },
     paidAmount: { type: Number, default: 0 },
     pendingAmount: { type: Number, default: 0 },
+    dueDate: { type: Date },
+    paymentStatus: { 
+      type: String, 
+      enum: ['pending', 'partial', 'paid'], 
+      default: 'pending' 
+    },
     feeHistory: [{
-      amount: Number,
-      paymentDate: Date,
-      paymentMethod: String,
-      receiptNumber: String,
-      description: String
-    }]
+      amount: { type: Number, required: true },
+      paymentDate: { type: Date, default: Date.now },
+      paymentMethod: { 
+        type: String, 
+        enum: ['cash', 'cheque', 'online', 'card', 'upi'], 
+        required: true 
+      },
+      receiptNumber: { type: String, required: true },
+      description: { type: String },
+      enteredBy: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: "User" 
+      },
+      enteredAt: { type: Date, default: Date.now }
+    }],
+    lastPaymentDate: { type: Date },
+    updatedBy: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: "User" 
+    },
+    updatedAt: { type: Date, default: Date.now }
   },
   
   // Medical Information

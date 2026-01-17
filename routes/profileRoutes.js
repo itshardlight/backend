@@ -183,8 +183,25 @@ router.get("/:id", authenticateToken, async (req, res) => {
             message: "Access denied - not your profile"
           });
         }
-        // Remove fee details and sensitive parent info
-        delete filteredProfile.feeInfo;
+        // Students can see their fee information but with limited details
+        if (filteredProfile.feeInfo) {
+          filteredProfile.feeInfo = {
+            totalFee: filteredProfile.feeInfo.totalFee,
+            tuitionFee: filteredProfile.feeInfo.tuitionFee,
+            admissionFee: filteredProfile.feeInfo.admissionFee,
+            examFee: filteredProfile.feeInfo.examFee,
+            libraryFee: filteredProfile.feeInfo.libraryFee,
+            sportsFee: filteredProfile.feeInfo.sportsFee,
+            otherFees: filteredProfile.feeInfo.otherFees,
+            paidAmount: filteredProfile.feeInfo.paidAmount,
+            pendingAmount: filteredProfile.feeInfo.pendingAmount,
+            dueDate: filteredProfile.feeInfo.dueDate,
+            paymentStatus: filteredProfile.feeInfo.paymentStatus,
+            feeHistory: filteredProfile.feeInfo.feeHistory,
+            lastPaymentDate: filteredProfile.feeInfo.lastPaymentDate
+          };
+        }
+        // Remove sensitive parent info
         if (filteredProfile.parentInfo) {
           filteredProfile.parentInfo = {
             fatherName: filteredProfile.parentInfo.fatherName,
@@ -301,7 +318,24 @@ router.get("/me/profile", authenticateToken, async (req, res) => {
 
     switch (userRole) {
       case "student":
-        delete filteredProfile.feeInfo;
+        // Students can see their fee information but with limited details
+        if (filteredProfile.feeInfo) {
+          filteredProfile.feeInfo = {
+            totalFee: filteredProfile.feeInfo.totalFee,
+            tuitionFee: filteredProfile.feeInfo.tuitionFee,
+            admissionFee: filteredProfile.feeInfo.admissionFee,
+            examFee: filteredProfile.feeInfo.examFee,
+            libraryFee: filteredProfile.feeInfo.libraryFee,
+            sportsFee: filteredProfile.feeInfo.sportsFee,
+            otherFees: filteredProfile.feeInfo.otherFees,
+            paidAmount: filteredProfile.feeInfo.paidAmount,
+            pendingAmount: filteredProfile.feeInfo.pendingAmount,
+            dueDate: filteredProfile.feeInfo.dueDate,
+            paymentStatus: filteredProfile.feeInfo.paymentStatus,
+            feeHistory: filteredProfile.feeInfo.feeHistory,
+            lastPaymentDate: filteredProfile.feeInfo.lastPaymentDate
+          };
+        }
         if (filteredProfile.parentInfo) {
           filteredProfile.parentInfo = {
             fatherName: filteredProfile.parentInfo.fatherName,

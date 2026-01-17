@@ -4,12 +4,12 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Middleware to check if user is teacher or admin
-const requireTeacherOrAdmin = (req, res, next) => {
-  if (!req.user || !['teacher', 'admin'].includes(req.user.role)) {
+// Middleware to check if user is fee_department or admin
+const requireFeeOrAdmin = (req, res, next) => {
+  if (!req.user || !['fee_department', 'admin'].includes(req.user.role)) {
     return res.status(403).json({ 
       success: false, 
-      message: 'Access denied. Teacher or Admin role required.' 
+      message: 'Access denied. Fee Department or Admin role required.' 
     });
   }
   next();
@@ -27,7 +27,7 @@ const requireAdmin = (req, res, next) => {
 };
 
 // GET /api/fees/students - Get students with fee information
-router.get('/students', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
+router.get('/students', authenticateToken, requireFeeOrAdmin, async (req, res) => {
   try {
     const { 
       class: className, 
@@ -38,24 +38,97 @@ router.get('/students', authenticateToken, requireTeacherOrAdmin, async (req, re
       limit = 50
     } = req.query;
 
-    // Build filter object
-    const filter = {};
-    if (className) filter['academic.class'] = className;
-    if (section) filter['academic.section'] = section;
-    if (academicYear) filter['academic.academicYear'] = academicYear;
-
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Use Profile model (assuming it exists)
+    // Get students from Student collection
+    const Student = mongoose.model('Student');
     const Profile = mongoose.model('Profile');
-    let students = await Profile.find(filter)
-      .sort({ 'academic.rollNumber': 1 })
+    
+    // Build filter for Student collection
+    const studentFilter = { status: 'active' };
+    if (className) studentFilter.class = className;
+    if (section) studentFilter.section = section;
+
+    // Get all active students
+    const students = await Student.find(studentFilter)
+      .populate('userId', 'username email role')
+      .sort({ class: 1, section: 1, rollNumber: 1 })
       .skip(skip)
       .limit(parseInt(limit));
 
+    // Get all profiles to merge fee information
+    const profiles = await Profile.find({})
+      .populate('userId', 'username email role');
+
+    // Create a map of profiles by userId for quick lookup
+    const profileMap = new Map();
+    profiles.forEach(profile => {
+      if (profile.userId) {
+        profileMap.set(profile.userId._id.toString(), profile);
+      }
+    });
+
+    // Merge student data with profile fee information
+    let mergedStudents = students.map(student => {
+      const studentObj = student.toObject();
+      
+      // Look for corresponding profile
+      let profile = null;
+      if (student.userId) {
+        profile = profileMap.get(student.userId._id.toString());
+      }
+      
+      // If no profile found, try to find by email match
+      if (!profile) {
+        profile = profiles.find(p => 
+          p.firstName === student.firstName && 
+          p.lastName === student.lastName &&
+          p.academic?.currentGrade === student.class &&
+          p.academic?.section === student.section
+        );
+      }
+
+      // Merge the data
+      const mergedStudent = {
+        _id: student._id,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        fullName: student.fullName,
+        email: student.email,
+        phone: student.phone,
+        userId: student.userId,
+        academic: {
+          currentGrade: student.class,
+          section: student.section,
+          rollNumber: student.rollNumber,
+          admissionDate: student.admissionDate,
+          academicYear: academicYear || '2024-25'
+        },
+        parentInfo: {
+          fatherName: student.parentName,
+          motherName: student.parentName, // Using same as father for now
+          guardianName: student.parentName,
+          parentPhone: student.parentPhone,
+          parentEmail: student.parentEmail,
+          emergencyContact: student.emergencyContact
+        },
+        feeInfo: profile?.feeInfo || {
+          totalFee: 0,
+          paidAmount: 0,
+          pendingAmount: 0,
+          paymentStatus: 'pending',
+          feeHistory: []
+        },
+        status: student.status,
+        registrationDate: student.registrationDate
+      };
+
+      return mergedStudent;
+    });
+
     // Filter by payment status if specified
     if (paymentStatus) {
-      students = students.filter(student => {
+      mergedStudents = mergedStudents.filter(student => {
         const feeInfo = student.feeInfo || {};
         const totalFee = feeInfo.totalFee || 0;
         const paidAmount = feeInfo.paidAmount || 0;
@@ -76,11 +149,11 @@ router.get('/students', authenticateToken, requireTeacherOrAdmin, async (req, re
       });
     }
 
-    const total = students.length;
+    const total = mergedStudents.length;
 
     res.json({
       success: true,
-      data: students,
+      data: mergedStudents,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
@@ -137,7 +210,7 @@ router.get('/student/:studentId', authenticateToken, async (req, res) => {
 });
 
 // POST /api/fees/payment - Add payment for student
-router.post('/payment', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
+router.post('/payment', authenticateToken, requireFeeOrAdmin, async (req, res) => {
   try {
     const {
       studentId,
@@ -163,9 +236,12 @@ router.post('/payment', authenticateToken, requireTeacherOrAdmin, async (req, re
       });
     }
 
+    const Student = mongoose.model('Student');
     const Profile = mongoose.model('Profile');
-    const student = await Profile.findById(studentId);
 
+    // First, try to find the student in Student collection
+    const student = await Student.findById(studentId).populate('userId');
+    
     if (!student) {
       return res.status(404).json({
         success: false,
@@ -173,7 +249,68 @@ router.post('/payment', authenticateToken, requireTeacherOrAdmin, async (req, re
       });
     }
 
-    const currentFeeInfo = student.feeInfo || {};
+    // Find or create corresponding profile
+    let profile = null;
+    
+    if (student.userId) {
+      profile = await Profile.findOne({ userId: student.userId._id });
+    }
+    
+    // If no profile found, try to find by name and class match
+    if (!profile) {
+      profile = await Profile.findOne({
+        firstName: student.firstName,
+        lastName: student.lastName,
+        'academic.currentGrade': student.class,
+        'academic.section': student.section
+      });
+    }
+    
+    // If still no profile, create one
+    if (!profile) {
+      profile = new Profile({
+        userId: student.userId?._id || null,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        dateOfBirth: student.dateOfBirth,
+        gender: student.gender,
+        bloodGroup: student.bloodGroup,
+        phone: student.phone,
+        address: {
+          street: student.address,
+          city: student.city,
+          state: student.state,
+          zipCode: student.zipCode
+        },
+        academic: {
+          currentGrade: student.class,
+          section: student.section,
+          rollNumber: student.rollNumber,
+          admissionDate: student.admissionDate,
+          academicYear: '2024-25'
+        },
+        parentInfo: {
+          fatherName: student.parentName,
+          motherName: student.parentName,
+          guardianName: student.parentName,
+          parentPhone: student.parentPhone,
+          parentEmail: student.parentEmail,
+          emergencyContact: student.emergencyContact
+        },
+        feeInfo: {
+          totalFee: 0,
+          paidAmount: 0,
+          pendingAmount: 0,
+          paymentStatus: 'pending',
+          feeHistory: []
+        },
+        createdBy: req.user._id
+      });
+      
+      await profile.save();
+    }
+
+    const currentFeeInfo = profile.feeInfo || {};
     const paymentAmount = parseFloat(amount);
     const newPaidAmount = (currentFeeInfo.paidAmount || 0) + paymentAmount;
     const totalFee = currentFeeInfo.totalFee || 0;
@@ -200,8 +337,8 @@ router.post('/payment', authenticateToken, requireTeacherOrAdmin, async (req, re
       paymentStatus: newPendingAmount <= 0 ? 'paid' : newPaidAmount > 0 ? 'partial' : 'pending'
     };
 
-    student.feeInfo = updatedFeeInfo;
-    await student.save();
+    profile.feeInfo = updatedFeeInfo;
+    await profile.save();
 
     res.status(201).json({
       success: true,
@@ -222,7 +359,7 @@ router.post('/payment', authenticateToken, requireTeacherOrAdmin, async (req, re
 });
 
 // PUT /api/fees/structure/:studentId - Update fee structure for student
-router.put('/structure/:studentId', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
+router.put('/structure/:studentId', authenticateToken, requireFeeOrAdmin, async (req, res) => {
   try {
     const { studentId } = req.params;
     const {
@@ -243,9 +380,12 @@ router.put('/structure/:studentId', authenticateToken, requireTeacherOrAdmin, as
       });
     }
 
+    const Student = mongoose.model('Student');
     const Profile = mongoose.model('Profile');
-    const student = await Profile.findById(studentId);
 
+    // First, try to find the student in Student collection
+    const student = await Student.findById(studentId).populate('userId');
+    
     if (!student) {
       return res.status(404).json({
         success: false,
@@ -253,7 +393,68 @@ router.put('/structure/:studentId', authenticateToken, requireTeacherOrAdmin, as
       });
     }
 
-    const currentFeeInfo = student.feeInfo || {};
+    // Find or create corresponding profile
+    let profile = null;
+    
+    if (student.userId) {
+      profile = await Profile.findOne({ userId: student.userId._id });
+    }
+    
+    // If no profile found, try to find by name and class match
+    if (!profile) {
+      profile = await Profile.findOne({
+        firstName: student.firstName,
+        lastName: student.lastName,
+        'academic.currentGrade': student.class,
+        'academic.section': student.section
+      });
+    }
+    
+    // If still no profile, create one
+    if (!profile) {
+      profile = new Profile({
+        userId: student.userId?._id || null,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        dateOfBirth: student.dateOfBirth,
+        gender: student.gender,
+        bloodGroup: student.bloodGroup,
+        phone: student.phone,
+        address: {
+          street: student.address,
+          city: student.city,
+          state: student.state,
+          zipCode: student.zipCode
+        },
+        academic: {
+          currentGrade: student.class,
+          section: student.section,
+          rollNumber: student.rollNumber,
+          admissionDate: student.admissionDate,
+          academicYear: '2024-25'
+        },
+        parentInfo: {
+          fatherName: student.parentName,
+          motherName: student.parentName,
+          guardianName: student.parentName,
+          parentPhone: student.parentPhone,
+          parentEmail: student.parentEmail,
+          emergencyContact: student.emergencyContact
+        },
+        feeInfo: {
+          totalFee: 0,
+          paidAmount: 0,
+          pendingAmount: 0,
+          paymentStatus: 'pending',
+          feeHistory: []
+        },
+        createdBy: req.user._id
+      });
+      
+      await profile.save();
+    }
+
+    const currentFeeInfo = profile.feeInfo || {};
     const newTotalFee = parseFloat(totalFee);
     const currentPaidAmount = currentFeeInfo.paidAmount || 0;
     const newPendingAmount = Math.max(0, newTotalFee - currentPaidAmount);
@@ -274,8 +475,8 @@ router.put('/structure/:studentId', authenticateToken, requireTeacherOrAdmin, as
       updatedAt: new Date()
     };
 
-    student.feeInfo = updatedFeeInfo;
-    await student.save();
+    profile.feeInfo = updatedFeeInfo;
+    await profile.save();
 
     res.json({
       success: true,
@@ -293,21 +494,64 @@ router.put('/structure/:studentId', authenticateToken, requireTeacherOrAdmin, as
 });
 
 // GET /api/fees/analytics - Get fee collection analytics
-router.get('/analytics', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
+router.get('/analytics', authenticateToken, requireFeeOrAdmin, async (req, res) => {
   try {
     const { class: className, section, academicYear } = req.query;
 
-    const filter = {};
-    if (className) filter['academic.class'] = className;
-    if (section) filter['academic.section'] = section;
-    if (academicYear) filter['academic.academicYear'] = academicYear;
-
+    const Student = mongoose.model('Student');
     const Profile = mongoose.model('Profile');
-    const students = await Profile.find(filter);
+    
+    // Build filter for Student collection
+    const studentFilter = { status: 'active' };
+    if (className) studentFilter.class = className;
+    if (section) studentFilter.section = section;
+
+    // Get all active students
+    const students = await Student.find(studentFilter);
+    
+    // Get all profiles to merge fee information
+    const profiles = await Profile.find({});
+
+    // Create a map of profiles by userId for quick lookup
+    const profileMap = new Map();
+    profiles.forEach(profile => {
+      if (profile.userId) {
+        profileMap.set(profile.userId.toString(), profile);
+      }
+    });
+
+    // Merge student data with profile fee information
+    const mergedStudents = students.map(student => {
+      let profile = null;
+      if (student.userId) {
+        profile = profileMap.get(student.userId.toString());
+      }
+      
+      // If no profile found, try to find by name match
+      if (!profile) {
+        profile = profiles.find(p => 
+          p.firstName === student.firstName && 
+          p.lastName === student.lastName &&
+          p.academic?.currentGrade === student.class &&
+          p.academic?.section === student.section
+        );
+      }
+
+      return {
+        ...student.toObject(),
+        feeInfo: profile?.feeInfo || {
+          totalFee: 0,
+          paidAmount: 0,
+          pendingAmount: 0,
+          paymentStatus: 'pending',
+          feeHistory: []
+        }
+      };
+    });
 
     // Calculate analytics
-    const totalStudents = students.length;
-    const studentsWithFee = students.filter(s => (s.feeInfo?.totalFee || 0) > 0);
+    const totalStudents = mergedStudents.length;
+    const studentsWithFee = mergedStudents.filter(s => (s.feeInfo?.totalFee || 0) > 0);
     
     const totalFeeAmount = studentsWithFee.reduce((sum, s) => sum + (s.feeInfo?.totalFee || 0), 0);
     const totalPaidAmount = studentsWithFee.reduce((sum, s) => sum + (s.feeInfo?.paidAmount || 0), 0);
