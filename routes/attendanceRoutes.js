@@ -27,6 +27,97 @@ router.post("/test-mark", async (req, res) => {
   });
 });
 
+// Get attendance for a specific student by student ID (admin/teacher access)
+router.get("/student/:studentId", authenticateToken, requireRole(['admin', 'teacher']), async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { startDate, endDate, subject } = req.query;
+    
+    // Find the student record
+    const student = await Student.findById(studentId);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student not found"
+      });
+    }
+
+    // Set default date range if not provided (last 30 days)
+    const defaultEndDate = new Date();
+    const defaultStartDate = new Date();
+    defaultStartDate.setDate(defaultStartDate.getDate() - 30);
+
+    // Build filter
+    const filter = { 
+      studentId: student._id,
+      date: {
+        $gte: new Date(startDate || defaultStartDate),
+        $lte: new Date(endDate || defaultEndDate)
+      }
+    };
+    
+    if (subject) {
+      filter.subject = subject;
+    }
+
+    // Get attendance records
+    const records = await Attendance.find(filter)
+      .sort({ date: -1, period: 1 })
+      .populate('markedBy', 'fullName username')
+      .lean();
+
+    // Get summary using the model's static method
+    const summary = await Attendance.getStudentSummary(
+      student._id,
+      filter.date.$gte,
+      filter.date.$lte
+    );
+
+    // Get subject-wise summary
+    const subjectSummary = await Attendance.getSubjectSummary(
+      student._id,
+      filter.date.$gte,
+      filter.date.$lte
+    );
+
+    // Format records for frontend
+    const formattedRecords = records.map(record => ({
+      date: record.date,
+      subject: record.subject,
+      period: record.period,
+      status: record.status,
+      timeIn: record.timeIn,
+      timeOut: record.timeOut,
+      remarks: record.remarks,
+      markedBy: record.markedBy?.fullName || 'System',
+      markedAt: record.markedAt
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        summary,
+        subjectSummary,
+        records: formattedRecords,
+        student: {
+          name: student.fullName,
+          rollNumber: student.rollNumber,
+          class: student.class,
+          section: student.section
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching student attendance:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching attendance data",
+      error: error.message
+    });
+  }
+});
+
 // Get attendance for a specific student (student can view their own)
 router.get("/my-attendance", authenticateToken, async (req, res) => {
   try {
@@ -42,15 +133,19 @@ router.get("/my-attendance", authenticateToken, async (req, res) => {
       });
     }
 
+    // Set default date range if not provided (last 30 days)
+    const defaultEndDate = new Date();
+    const defaultStartDate = new Date();
+    defaultStartDate.setDate(defaultStartDate.getDate() - 30);
+
     // Build filter
-    const filter = { studentId: student._id };
-    
-    if (startDate && endDate) {
-      filter.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
-      };
-    }
+    const filter = { 
+      studentId: student._id,
+      date: {
+        $gte: new Date(startDate || defaultStartDate),
+        $lte: new Date(endDate || defaultEndDate)
+      }
+    };
     
     if (subject) {
       filter.subject = subject;
@@ -62,26 +157,39 @@ router.get("/my-attendance", authenticateToken, async (req, res) => {
       .populate('markedBy', 'fullName username')
       .lean();
 
-    // Get summary
+    // Get summary using the model's static method
     const summary = await Attendance.getStudentSummary(
       student._id,
-      startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Default: last 30 days
-      endDate || new Date()
+      filter.date.$gte,
+      filter.date.$lte
     );
 
     // Get subject-wise summary
     const subjectSummary = await Attendance.getSubjectSummary(
       student._id,
-      startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      endDate || new Date()
+      filter.date.$gte,
+      filter.date.$lte
     );
+
+    // Format records for frontend
+    const formattedRecords = records.map(record => ({
+      date: record.date,
+      subject: record.subject,
+      period: record.period,
+      status: record.status,
+      timeIn: record.timeIn,
+      timeOut: record.timeOut,
+      remarks: record.remarks,
+      markedBy: record.markedBy?.fullName || 'System',
+      markedAt: record.markedAt
+    }));
 
     res.json({
       success: true,
       data: {
         summary,
         subjectSummary,
-        records,
+        records: formattedRecords,
         student: {
           name: student.fullName,
           rollNumber: student.rollNumber,
