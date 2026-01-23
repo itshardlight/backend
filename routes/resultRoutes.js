@@ -34,6 +34,78 @@ router.get('/test', (req, res) => {
   res.json({ success: true, message: 'Results API is working' });
 });
 
+// GET /api/results/my-results - Get current student's results
+router.get('/my-results', authenticateToken, async (req, res) => {
+  try {
+    // Only students can access this endpoint
+    if (req.user.role !== 'student') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Student role required.'
+      });
+    }
+
+    const { academicYear, examType } = req.query;
+
+    // First try to find the student record using the old Student model
+    let student = await Student.findOne({ userId: req.user._id });
+    
+    // If not found in Student model, try to find in Profile model
+    if (!student) {
+      const Profile = mongoose.model('Profile');
+      const profile = await Profile.findOne({ userId: req.user._id });
+      
+      if (profile) {
+        // Create a student-like object from profile data
+        student = {
+          _id: profile._id,
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          rollNumber: profile.academic?.rollNumber,
+          class: profile.academic?.currentGrade,
+          section: profile.academic?.section
+        };
+      }
+    }
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student record not found'
+      });
+    }
+
+    // Build filter for student's results
+    const filter = { studentId: student._id };
+    if (academicYear) filter.academicYear = academicYear;
+    if (examType) filter.examType = examType;
+
+    const results = await Result.find(filter)
+      .populate('enteredBy', 'fullName')
+      .populate('verifiedBy', 'fullName')
+      .sort({ examDate: -1, createdAt: -1 });
+
+    res.json({
+      success: true,
+      results: results,
+      student: {
+        id: student._id,
+        name: `${student.firstName} ${student.lastName}`,
+        rollNumber: student.rollNumber,
+        class: student.class,
+        section: student.section
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching student results:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching student results',
+      error: error.message
+    });
+  }
+});
+
 // GET /api/results - Get all results with filters
 router.get('/', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
   try {
