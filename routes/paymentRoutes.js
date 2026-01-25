@@ -125,7 +125,7 @@ router.post('/esewa/initialize', authenticateToken, async (req, res) => {
       });
     }
 
-    // Convert amounts to numbers and validate
+    // Convert amounts to numbers and validate (simple amounts, not paisa)
     const numericAmount = parseFloat(amount);
     const numericTaxAmount = parseFloat(taxAmount);
     
