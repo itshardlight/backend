@@ -29,11 +29,6 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// Test endpoint
-router.get('/test', (req, res) => {
-  res.json({ success: true, message: 'Results API is working' });
-});
-
 // GET /api/results/my-results - Get current student's results
 router.get('/my-results', authenticateToken, async (req, res) => {
   try {

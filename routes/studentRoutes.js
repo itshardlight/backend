@@ -68,7 +68,7 @@ router.get("/stats/public", async (req, res) => {
         totalStudents,
         activeStudents,
         newThisMonth,
-        totalClasses: 8 // Static for now
+        totalClasses: 10 // Updated to reflect classes 1-10
       }
     });
   } catch (error) {
@@ -76,6 +76,48 @@ router.get("/stats/public", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error fetching statistics",
+      error: error.message
+    });
+  }
+});
+
+// Public route to get student counts by class and section
+router.get("/counts/class-section", async (req, res) => {
+  try {
+    const counts = await Student.aggregate([
+      {
+        $match: { status: 'active' }
+      },
+      {
+        $group: {
+          _id: { class: '$class', section: '$section' },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { '_id.class': 1, '_id.section': 1 }
+      }
+    ]);
+
+    // Transform the data into a more usable format
+    const classSectionCounts = {};
+    counts.forEach(item => {
+      const { class: cls, section } = item._id;
+      if (!classSectionCounts[cls]) {
+        classSectionCounts[cls] = {};
+      }
+      classSectionCounts[cls][section] = item.count;
+    });
+
+    res.json({
+      success: true,
+      data: classSectionCounts
+    });
+  } catch (error) {
+    console.error("Error fetching class-section counts:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching class-section counts",
       error: error.message
     });
   }
