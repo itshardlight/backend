@@ -6,26 +6,7 @@ import { authenticateToken, requireRole } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Test route (no authentication required)
-router.get("/test", async (req, res) => {
-  res.json({
-    success: true,
-    message: "Attendance routes are working!",
-    timestamp: new Date().toISOString()
-  });
-});
 
-// Test route for mark-attendance (no auth for testing)
-router.post("/test-mark", async (req, res) => {
-  console.log("🧪 Test mark-attendance endpoint hit!");
-  console.log("Request body:", req.body);
-  
-  res.json({
-    success: true,
-    message: "Test mark-attendance endpoint working",
-    receivedData: req.body
-  });
-});
 
 // Get attendance for a specific student by student ID (admin/teacher access)
 router.get("/student/:studentId", authenticateToken, requireRole(['admin', 'teacher']), async (req, res) => {
@@ -366,22 +347,15 @@ router.get("/class/:class/:section", authenticateToken, requireRole(['admin', 't
 // Mark attendance for multiple students
 router.post("/mark-attendance", authenticateToken, requireRole(['admin', 'teacher']), async (req, res) => {
   try {
-    console.log("📝 Mark attendance endpoint hit!");
-    console.log("User:", req.user?.username, req.user?.role);
-    console.log("Request body:", req.body);
-    
     const { class: studentClass, section, date, subject, period, attendanceData } = req.body;
     const markedBy = req.user._id;
 
     if (!studentClass || !section || !date || !subject || !period || !attendanceData) {
-      console.log("❌ Missing required fields");
       return res.status(400).json({
         success: false,
         message: "All fields are required: class, section, date, subject, period, attendanceData"
       });
     }
-
-    console.log(`📊 Processing attendance for ${attendanceData.length} students`);
 
     const targetDate = new Date(date);
     const results = [];
@@ -440,15 +414,10 @@ router.post("/mark-attendance", authenticateToken, requireRole(['admin', 'teache
           success: true
         });
 
-        console.log(`✅ Marked ${status} for ${attendanceRecord.studentId.fullName}`);
-
       } catch (error) {
-        console.error(`❌ Error for student ${item.studentId}:`, error);
         errors.push(`Error marking attendance for student ${item.studentId}: ${error.message}`);
       }
     }
-
-    console.log(`📈 Results: ${results.length} successful, ${errors.length} errors`);
 
     res.json({
       success: errors.length === 0,
@@ -462,7 +431,7 @@ router.post("/mark-attendance", authenticateToken, requireRole(['admin', 'teache
     });
 
   } catch (error) {
-    console.error("❌ Mark attendance error:", error);
+    console.error("Mark attendance error:", error);
     res.status(500).json({
       success: false,
       message: "Error marking attendance",
