@@ -389,6 +389,8 @@ router.post('/', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
       examType,
       examName,
       academicYear,
+      studentClass,
+      studentSection,
       subjects,
       remarks,
       attendance
@@ -438,8 +440,8 @@ router.post('/', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
     const newResult = new Result({
       studentId,
       rollNumber: student.rollNumber,
-      class: student.class,
-      section: student.section,
+      class: studentClass || student.class,
+      section: studentSection || student.section,
       examType,
       examName,
       academicYear,
