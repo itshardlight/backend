@@ -305,20 +305,86 @@ router.post("/register", async (req, res) => {
     const student = new Student(studentData);
     await student.save();
 
-    // Update user with student reference (optional, for easier queries)
-    user.fullName = student.fullName;
-    await user.save();
+    // Import Profile model
+    const Profile = (await import("../models/Profile.js")).default;
+
+    // Create Profile record linked to User and Student
+    const profile = new Profile({
+      userId: user._id,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      dateOfBirth: student.dateOfBirth,
+      gender: student.gender,
+      bloodGroup: student.bloodGroup,
+      phone: student.phone,
+      address: {
+        street: student.address,
+        city: student.city,
+        state: student.state,
+        zipCode: student.zipCode,
+        country: "Nepal"
+      },
+      academic: {
+        currentGrade: student.class,
+        section: student.section,
+        rollNumber: student.rollNumber,
+        admissionDate: student.admissionDate,
+        previousSchool: student.previousSchool
+      },
+      parentInfo: {
+        fatherName: student.parentName,
+        motherName: student.parentName,
+        guardianName: student.parentName,
+        parentPhone: student.parentPhone,
+        parentEmail: student.parentEmail,
+        emergencyContact: student.emergencyContact
+      },
+      medicalInfo: {
+        conditions: student.medicalConditions
+      },
+      feeInfo: {
+        totalFee: 0,
+        paidAmount: 0,
+        pendingAmount: 0,
+        paymentStatus: 'pending'
+      },
+      achievements: [],
+      createdBy: user._id
+    });
+
+    await profile.save();
+
+    // Create parent user account if parent email provided
+    let parentUser = null;
+    if (student.parentEmail) {
+      const existingParent = await User.findOne({ email: student.parentEmail });
+      if (!existingParent) {
+        const parentPassword = `parent@${student.rollNumber}`;
+        parentUser = new User({
+          username: `parent_${student.rollNumber}`,
+          email: student.parentEmail,
+          password: parentPassword,
+          fullName: student.parentName,
+          role: "parent",
+          isVerified: true,
+          requirePasswordChange: true
+        });
+        await parentUser.save();
+      }
+    }
 
     // Send email notification to parent
     const loginCredentials = {
       username: username,
-      temporaryPassword: defaultPassword
+      temporaryPassword: defaultPassword,
+      parentUsername: parentUser ? parentUser.username : null,
+      parentPassword: parentUser ? `parent@${student.rollNumber}` : null
     };
     const { emailSent, emailError } = await sendParentNotification(student, loginCredentials);
 
     res.status(201).json({
       success: true,
-      message: "Student registered successfully with user account created",
+      message: "Student registered successfully - All accounts and records created and linked",
       data: {
         student: student,
         user: {
@@ -328,15 +394,38 @@ router.post("/register", async (req, res) => {
           role: user.role,
           requirePasswordChange: user.requirePasswordChange
         },
+        profile: {
+          id: profile._id,
+          rollNumber: profile.academic.rollNumber,
+          class: profile.academic.currentGrade,
+          section: profile.academic.section
+        },
+        parentUser: parentUser ? {
+          id: parentUser._id,
+          username: parentUser.username,
+          email: parentUser.email
+        } : null,
         loginCredentials: {
-          username: username,
-          temporaryPassword: defaultPassword,
-          note: "Student must change password on first login"
+          studentUsername: username,
+          studentPassword: defaultPassword,
+          parentUsername: parentUser ? parentUser.username : null,
+          parentPassword: parentUser ? `parent@${student.rollNumber}` : null,
+          note: "Both student and parent must change password on first login"
         },
         emailNotification: {
           sent: emailSent,
           parentEmail: student.parentEmail || null,
           error: emailError
+        },
+        linkedSystems: {
+          userAccount: true,
+          studentRecord: true,
+          profile: true,
+          parentAccount: !!parentUser,
+          readyForAttendance: true,
+          readyForFees: true,
+          readyForAchievements: true,
+          readyForResults: true
         }
       }
     });
@@ -439,6 +528,9 @@ router.get("/:id", authenticateToken, requireRole(['admin']), async (req, res) =
 // Create new student (admin only)
 router.post("/", authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
+    // Import Profile model
+    const Profile = (await import("../models/Profile.js")).default;
+
     // Check if roll number already exists
     const existingRollNumber = await Student.findOne({ rollNumber: req.body.rollNumber });
     if (existingRollNumber) {
@@ -490,20 +582,83 @@ router.post("/", authenticateToken, requireRole(['admin']), async (req, res) => 
     const student = new Student(studentData);
     await student.save();
 
-    // Update user with student reference (optional, for easier queries)
-    user.fullName = student.fullName;
-    await user.save();
+    // Create Profile record linked to User and Student
+    const profile = new Profile({
+      userId: user._id,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      dateOfBirth: student.dateOfBirth,
+      gender: student.gender,
+      bloodGroup: student.bloodGroup,
+      phone: student.phone,
+      address: {
+        street: student.address,
+        city: student.city,
+        state: student.state,
+        zipCode: student.zipCode,
+        country: "Nepal"
+      },
+      academic: {
+        currentGrade: student.class,
+        section: student.section,
+        rollNumber: student.rollNumber,
+        admissionDate: student.admissionDate,
+        previousSchool: student.previousSchool
+      },
+      parentInfo: {
+        fatherName: student.parentName,
+        motherName: student.parentName,
+        guardianName: student.parentName,
+        parentPhone: student.parentPhone,
+        parentEmail: student.parentEmail,
+        emergencyContact: student.emergencyContact
+      },
+      medicalInfo: {
+        conditions: student.medicalConditions
+      },
+      feeInfo: {
+        totalFee: 0,
+        paidAmount: 0,
+        pendingAmount: 0,
+        paymentStatus: 'pending'
+      },
+      achievements: [],
+      createdBy: req.user._id
+    });
+
+    await profile.save();
+
+    // Create parent user account if parent email provided
+    let parentUser = null;
+    if (student.parentEmail) {
+      const existingParent = await User.findOne({ email: student.parentEmail });
+      if (!existingParent) {
+        const parentPassword = `parent@${student.rollNumber}`;
+        parentUser = new User({
+          username: `parent_${student.rollNumber}`,
+          email: student.parentEmail,
+          password: parentPassword,
+          fullName: student.parentName,
+          role: "parent",
+          isVerified: true,
+          requirePasswordChange: true
+        });
+        await parentUser.save();
+      }
+    }
 
     // Send email notification to parent
     const loginCredentials = {
       username: username,
-      temporaryPassword: defaultPassword
+      temporaryPassword: defaultPassword,
+      parentUsername: parentUser ? parentUser.username : null,
+      parentPassword: parentUser ? `parent@${student.rollNumber}` : null
     };
     const { emailSent, emailError } = await sendParentNotification(student, loginCredentials);
 
     res.status(201).json({
       success: true,
-      message: "Student registered successfully with user account created",
+      message: "Student registered successfully - All accounts and records created and linked",
       data: {
         student: student,
         user: {
@@ -513,15 +668,38 @@ router.post("/", authenticateToken, requireRole(['admin']), async (req, res) => 
           role: user.role,
           requirePasswordChange: user.requirePasswordChange
         },
+        profile: {
+          id: profile._id,
+          rollNumber: profile.academic.rollNumber,
+          class: profile.academic.currentGrade,
+          section: profile.academic.section
+        },
+        parentUser: parentUser ? {
+          id: parentUser._id,
+          username: parentUser.username,
+          email: parentUser.email
+        } : null,
         loginCredentials: {
-          username: username,
-          temporaryPassword: defaultPassword,
-          note: "Student must change password on first login"
+          studentUsername: username,
+          studentPassword: defaultPassword,
+          parentUsername: parentUser ? parentUser.username : null,
+          parentPassword: parentUser ? `parent@${student.rollNumber}` : null,
+          note: "Both student and parent must change password on first login"
         },
         emailNotification: {
           sent: emailSent,
           parentEmail: student.parentEmail || null,
           error: emailError
+        },
+        linkedSystems: {
+          userAccount: true,
+          studentRecord: true,
+          profile: true,
+          parentAccount: !!parentUser,
+          readyForAttendance: true,
+          readyForFees: true,
+          readyForAchievements: true,
+          readyForResults: true
         }
       }
     });
