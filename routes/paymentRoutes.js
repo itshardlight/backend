@@ -35,12 +35,23 @@ const generateTransactionUuid = () => {
 router.get('/test', authenticateToken, async (req, res) => {
   try {
     // Test basic functionality
+    const Profile = (await import('../models/Profile.js')).default;
+    const profile = await Profile.findOne({ userId: req.user.id });
+    
     const testData = {
       user: {
         id: req.user.id,
         username: req.user.username,
         role: req.user.role
       },
+      profile: profile ? {
+        id: profile._id,
+        name: `${profile.firstName} ${profile.lastName}`,
+        hasFeeInfo: !!profile.feeInfo,
+        totalFee: profile.feeInfo?.totalFee,
+        paidAmount: profile.feeInfo?.paidAmount,
+        pendingAmount: profile.feeInfo?.pendingAmount
+      } : null,
       esewaConfig: {
         hasSecretKey: !!process.env.ESEWA_SECRET_KEY,
         productCode: process.env.ESEWA_PRODUCT_CODE || 'EPAYTEST',
@@ -359,48 +370,57 @@ router.post('/esewa/verify', async (req, res) => {
         console.log('🔍 Looking for profile with userId:', paymentRecord.userId);
         
         if (profile) {
-          // Create payment history entry
-          const paymentHistoryEntry = {
-            amount: updatedPayment.totalAmount,
-            paymentDate: new Date(),
-            paymentMethod: 'esewa',
-            receiptNumber: referenceId,
-            description: updatedPayment.description || 'eSewa Payment',
-            enteredBy: paymentRecord.userId,
-            enteredAt: new Date()
-          };
+          // Check if this payment already exists in fee history (prevent duplicates)
+          const existingPayment = profile.feeInfo.feeHistory.find(
+            payment => payment.receiptNumber === referenceId
+          );
 
-          // Update fee information
-          const newPaidAmount = (profile.feeInfo.paidAmount || 0) + updatedPayment.totalAmount;
-          const newPendingAmount = (profile.feeInfo.totalFee || 0) - newPaidAmount;
-          
-          // Determine payment status
-          let paymentStatus = 'pending';
-          if (newPendingAmount <= 0) {
-            paymentStatus = 'paid';
-          } else if (newPaidAmount > 0) {
-            paymentStatus = 'partial';
+          if (existingPayment) {
+            console.log('⚠️  Payment already exists in fee history, skipping duplicate');
+          } else {
+            // Create payment history entry
+            const paymentHistoryEntry = {
+              amount: updatedPayment.totalAmount,
+              paymentDate: new Date(),
+              paymentMethod: 'esewa',
+              receiptNumber: referenceId,
+              description: updatedPayment.description || 'eSewa Payment',
+              enteredBy: paymentRecord.userId,
+              enteredAt: new Date()
+            };
+
+            // Update fee information
+            const newPaidAmount = (profile.feeInfo.paidAmount || 0) + updatedPayment.totalAmount;
+            const newPendingAmount = (profile.feeInfo.totalFee || 0) - newPaidAmount;
+            
+            // Determine payment status
+            let paymentStatus = 'pending';
+            if (newPendingAmount <= 0) {
+              paymentStatus = 'paid';
+            } else if (newPaidAmount > 0) {
+              paymentStatus = 'partial';
+            }
+
+            // Update profile
+            profile.feeInfo.paidAmount = newPaidAmount;
+            profile.feeInfo.pendingAmount = Math.max(0, newPendingAmount);
+            profile.feeInfo.paymentStatus = paymentStatus;
+            profile.feeInfo.lastPaymentDate = new Date();
+            profile.feeInfo.feeHistory.push(paymentHistoryEntry);
+            profile.feeInfo.updatedBy = paymentRecord.userId;
+            profile.feeInfo.updatedAt = new Date();
+
+            await profile.save();
+
+            console.log('✅ Profile updated with payment:', {
+              profileId: profile._id,
+              newPaidAmount,
+              newPendingAmount,
+              paymentStatus
+            });
           }
-
-          // Update profile
-          profile.feeInfo.paidAmount = newPaidAmount;
-          profile.feeInfo.pendingAmount = Math.max(0, newPendingAmount);
-          profile.feeInfo.paymentStatus = paymentStatus;
-          profile.feeInfo.lastPaymentDate = new Date();
-          profile.feeInfo.feeHistory.push(paymentHistoryEntry);
-          profile.feeInfo.updatedBy = paymentRecord.userId;
-          profile.feeInfo.updatedAt = new Date();
-
-          await profile.save();
-
-          console.log('✅ Profile updated with payment:', {
-            profileId: profile._id,
-            newPaidAmount,
-            newPendingAmount,
-            paymentStatus
-          });
         } else {
-          console.warn('⚠️  Profile not found for student:', paymentRecord.studentId);
+          console.warn('⚠️  Profile not found for userId:', paymentRecord.userId);
         }
       } catch (profileUpdateError) {
         console.error('❌ Failed to update profile with payment:', profileUpdateError);
