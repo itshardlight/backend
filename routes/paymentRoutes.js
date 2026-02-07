@@ -256,77 +256,183 @@ router.post('/esewa/verify', async (req, res) => {
       });
     }
 
+    // Find the payment record
+    const paymentRecord = await Payment.findOne({ transactionUuid });
+    
+    if (!paymentRecord) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment record not found'
+      });
+    }
+
+    // Check if already verified
+    if (paymentRecord.status === 'completed') {
+      return res.json({
+        success: true,
+        payment: {
+          transactionUuid: paymentRecord.transactionUuid,
+          amount: paymentRecord.totalAmount,
+          referenceId: paymentRecord.referenceId,
+          status: paymentRecord.status,
+          createdAt: paymentRecord.createdAt
+        },
+        message: 'Payment already verified'
+      });
+    }
+
     // Get eSewa configuration
     const merchantCode = process.env.ESEWA_MERCHANT_CODE || 'EPAYTEST';
     const environment = process.env.ESEWA_ENVIRONMENT || 'development';
     
-    // eSewa verification endpoint
-    const verificationUrl = environment === 'production'
-      ? 'https://epay.esewa.com.np/api/epay/transaction/status/'
-      : 'https://rc-epay.esewa.com.np/api/epay/transaction/status/';
+    let verificationSuccess = false;
+    let verificationData = null;
 
-    try {
-      // Call eSewa verification API
-      const verificationResponse = await axios.get(verificationUrl, {
-        params: {
-          product_code: merchantCode,
-          total_amount: amount,
-          transaction_uuid: transactionUuid
-        }
-      });
+    // In development, we can skip eSewa verification for testing
+    if (environment === 'development' && process.env.SKIP_ESEWA_VERIFICATION === 'true') {
+      console.log('⚠️  Development mode: Skipping eSewa verification');
+      verificationSuccess = true;
+      verificationData = {
+        status: 'COMPLETE',
+        transaction_uuid: transactionUuid,
+        product_code: merchantCode,
+        total_amount: amount,
+        ref_id: referenceId
+      };
+    } else {
+      // eSewa verification endpoint
+      const verificationUrl = environment === 'production'
+        ? 'https://epay.esewa.com.np/api/epay/transaction/status/'
+        : 'https://rc-epay.esewa.com.np/api/epay/transaction/status/';
 
-      const verificationData = verificationResponse.data;
+      try {
+        // Call eSewa verification API
+        const verificationResponse = await axios.get(verificationUrl, {
+          params: {
+            product_code: merchantCode,
+            total_amount: amount,
+            transaction_uuid: transactionUuid
+          }
+        });
 
-      if (verificationData.status === 'COMPLETE') {
-        // Payment verified successfully
+        verificationData = verificationResponse.data;
+        verificationSuccess = verificationData.status === 'COMPLETE';
+
+      } catch (verificationError) {
+        console.error('eSewa verification API error:', verificationError);
         
-        const updatedPayment = await Payment.findOneAndUpdate(
-          { transactionUuid },
-          {
-            status: 'completed',
-            referenceId,
-            verifiedAt: new Date(),
-            esewaResponse: verificationData
-          },
-          { new: true }
-        );
-
-        console.log('Payment verified successfully:', {
-          transactionUuid,
-          referenceId,
-          amount
-        });
-
-        res.json({
-          success: true,
-          payment: {
-            transactionUuid: updatedPayment.transactionUuid,
-            amount: updatedPayment.totalAmount,
-            referenceId: updatedPayment.referenceId,
-            status: updatedPayment.status,
-            createdAt: updatedPayment.createdAt
-          },
-          message: 'Payment verified successfully'
-        });
-
-      } else {
-        // Payment verification failed
-        res.status(400).json({
+        return res.status(500).json({
           success: false,
-          message: 'Payment verification failed',
-          esewaStatus: verificationData.status
+          message: 'Unable to verify payment with eSewa. Please contact support.',
+          requiresManualReview: true
         });
       }
+    }
 
-    } catch (verificationError) {
-      console.error('eSewa verification API error:', verificationError);
-      
-      // If verification API fails, we might still accept the payment
-      // but mark it for manual review
-      res.status(500).json({
+    if (verificationSuccess) {
+      // Payment verified successfully - Update payment record
+      const updatedPayment = await Payment.findOneAndUpdate(
+        { transactionUuid },
+        {
+          status: 'completed',
+          referenceId,
+          verifiedAt: new Date(),
+          esewaResponse: verificationData
+        },
+        { new: true }
+      );
+
+      console.log('Payment verified successfully:', {
+        transactionUuid,
+        referenceId,
+        amount,
+        studentId: paymentRecord.studentId
+      });
+
+      // Update student's profile with payment information
+      try {
+        const Profile = (await import('../models/Profile.js')).default;
+        
+        // Find the profile by userId - use paymentRecord.userId not studentId
+        const profile = await Profile.findOne({ userId: paymentRecord.userId });
+        
+        console.log('🔍 Looking for profile with userId:', paymentRecord.userId);
+        
+        if (profile) {
+          // Create payment history entry
+          const paymentHistoryEntry = {
+            amount: updatedPayment.totalAmount,
+            paymentDate: new Date(),
+            paymentMethod: 'esewa',
+            receiptNumber: referenceId,
+            description: updatedPayment.description || 'eSewa Payment',
+            enteredBy: paymentRecord.userId,
+            enteredAt: new Date()
+          };
+
+          // Update fee information
+          const newPaidAmount = (profile.feeInfo.paidAmount || 0) + updatedPayment.totalAmount;
+          const newPendingAmount = (profile.feeInfo.totalFee || 0) - newPaidAmount;
+          
+          // Determine payment status
+          let paymentStatus = 'pending';
+          if (newPendingAmount <= 0) {
+            paymentStatus = 'paid';
+          } else if (newPaidAmount > 0) {
+            paymentStatus = 'partial';
+          }
+
+          // Update profile
+          profile.feeInfo.paidAmount = newPaidAmount;
+          profile.feeInfo.pendingAmount = Math.max(0, newPendingAmount);
+          profile.feeInfo.paymentStatus = paymentStatus;
+          profile.feeInfo.lastPaymentDate = new Date();
+          profile.feeInfo.feeHistory.push(paymentHistoryEntry);
+          profile.feeInfo.updatedBy = paymentRecord.userId;
+          profile.feeInfo.updatedAt = new Date();
+
+          await profile.save();
+
+          console.log('✅ Profile updated with payment:', {
+            profileId: profile._id,
+            newPaidAmount,
+            newPendingAmount,
+            paymentStatus
+          });
+        } else {
+          console.warn('⚠️  Profile not found for student:', paymentRecord.studentId);
+        }
+      } catch (profileUpdateError) {
+        console.error('❌ Failed to update profile with payment:', profileUpdateError);
+        // Don't fail the verification if profile update fails
+      }
+
+      res.json({
+        success: true,
+        payment: {
+          transactionUuid: updatedPayment.transactionUuid,
+          amount: updatedPayment.totalAmount,
+          referenceId: updatedPayment.referenceId,
+          status: updatedPayment.status,
+          createdAt: updatedPayment.createdAt
+        },
+        message: 'Payment verified successfully'
+      });
+
+    } else {
+      // Payment verification failed
+      await Payment.findOneAndUpdate(
+        { transactionUuid },
+        {
+          status: 'failed',
+          failureReason: `eSewa status: ${verificationData?.status || 'unknown'}`
+        }
+      );
+
+      res.status(400).json({
         success: false,
-        message: 'Unable to verify payment with eSewa. Please contact support.',
-        requiresManualReview: true
+        message: 'Payment verification failed',
+        esewaStatus: verificationData?.status
       });
     }
 

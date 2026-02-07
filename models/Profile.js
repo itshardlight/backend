@@ -109,7 +109,7 @@ const profileSchema = new mongoose.Schema({
       paymentDate: { type: Date, default: Date.now },
       paymentMethod: { 
         type: String, 
-        enum: ['cash', 'cheque', 'online', 'card', 'upi'], 
+        enum: ['cash', 'cheque', 'online', 'card', 'upi', 'esewa'], 
         required: true 
       },
       receiptNumber: { type: String, required: true },
