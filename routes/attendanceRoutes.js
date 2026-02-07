@@ -102,11 +102,23 @@ router.get("/student/:studentId", authenticateToken, requireRole(['admin', 'teac
 // Get attendance for a specific student (student can view their own)
 router.get("/my-attendance", authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user._id;
     const { startDate, endDate, subject } = req.query;
     
     // Find the student record for this user
-    const student = await Student.findOne({ userId });
+    let student = await Student.findOne({ userId });
+    
+    // Fallback: try to find by email if userId not found
+    if (!student) {
+      student = await Student.findOne({ email: req.user.email });
+      
+      // If found, update the student record with userId for future queries
+      if (student && !student.userId) {
+        student.userId = userId;
+        await student.save();
+      }
+    }
+    
     if (!student) {
       return res.status(404).json({
         success: false,
@@ -376,6 +388,19 @@ router.post("/mark-attendance", authenticateToken, requireRole(['admin', 'teache
         if (!student) {
           errors.push(`Student ${studentId} not found or not in class ${studentClass}-${section}`);
           continue;
+        }
+
+        // Ensure student has userId (for legacy records)
+        if (!student.userId) {
+          const User = (await import("../models/User.js")).default;
+          const user = await User.findOne({ email: student.email });
+          if (user) {
+            student.userId = user._id;
+            await student.save();
+          } else {
+            errors.push(`Student ${student.firstName} ${student.lastName} has no linked user account`);
+            continue;
+          }
         }
 
         // Find or create attendance record
