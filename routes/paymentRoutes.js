@@ -171,6 +171,7 @@ router.post('/esewa/initialize', authenticateToken, async (req, res) => {
     const paymentRecord = new Payment({
       transactionUuid,
       studentId: String(studentId),
+      userId: req.user.id, // Add userId field
       feeType,
       amount: numericAmount,
       taxAmount: numericTaxAmount,
@@ -188,11 +189,15 @@ router.post('/esewa/initialize', authenticateToken, async (req, res) => {
       totalAmount: paymentRecord.totalAmount
     });
 
+    // Generate signature for frontend
+    const totalAmountForSignature = numericAmount + numericTaxAmount;
+    const signature = generateEsewaSignature(totalAmountForSignature, transactionUuid, productCode, secretKey);
+
     res.json({
       success: true,
       transactionUuid,
-      secretKey,
       productCode,
+      signature,
       message: 'Payment initialized successfully'
     });
 
