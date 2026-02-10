@@ -271,8 +271,7 @@ router.get("/me/profile", authenticateToken, async (req, res) => {
               address: {
                 street: student.address,
                 city: student.city,
-                state: student.state,
-                zipCode: student.zipCode
+                state: student.state
               },
               academic: {
                 currentGrade: student.class,
@@ -489,8 +488,7 @@ router.post("/:id/achievements", authenticateToken, requireRole(["student"]), as
             address: {
               street: student.address,
               city: student.city,
-              state: student.state,
-              zipCode: student.zipCode
+              state: student.state
             },
             academic: {
               currentGrade: student.class,

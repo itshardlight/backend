@@ -321,7 +321,6 @@ router.post("/register", async (req, res) => {
         street: student.address,
         city: student.city,
         state: student.state,
-        zipCode: student.zipCode,
         country: "Nepal"
       },
       academic: {
@@ -595,7 +594,6 @@ router.post("/", authenticateToken, requireRole(['admin']), async (req, res) => 
         street: student.address,
         city: student.city,
         state: student.state,
-        zipCode: student.zipCode,
         country: "Nepal"
       },
       academic: {

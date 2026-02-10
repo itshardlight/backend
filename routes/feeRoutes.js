@@ -35,7 +35,7 @@ router.get('/students', authenticateToken, requireFeeOrAdmin, async (req, res) =
       academicYear, 
       paymentStatus,
       page = 1,
-      limit = 50
+      limit = 1000 // Increased default limit to show all students
     } = req.query;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -279,8 +279,7 @@ router.post('/payment', authenticateToken, requireFeeOrAdmin, async (req, res) =
         address: {
           street: student.address,
           city: student.city,
-          state: student.state,
-          zipCode: student.zipCode
+          state: student.state
         },
         academic: {
           currentGrade: student.class,
@@ -423,8 +422,7 @@ router.put('/structure/:studentId', authenticateToken, requireFeeOrAdmin, async 
         address: {
           street: student.address,
           city: student.city,
-          state: student.state,
-          zipCode: student.zipCode
+          state: student.state
         },
         academic: {
           currentGrade: student.class,

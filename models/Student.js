@@ -54,11 +54,6 @@ const studentSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  zipCode: {
-    type: String,
-    required: true,
-    trim: true
-  },
 
   // Academic Information
   class: {
