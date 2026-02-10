@@ -77,13 +77,13 @@ const profileSchema = new mongoose.Schema({
   
   // Parent Information (for students)
   parentInfo: {
-    fatherName: String,
-    motherName: String,
-    guardianName: String,
-    parentPhone: String,
-    parentEmail: String,
-    emergencyContact: String,
-    occupation: String
+    fatherName: { type: String, required: false },
+    motherName: { type: String, required: false },
+    guardianName: { type: String, required: false },
+    parentPhone: { type: String, required: false },
+    parentEmail: { type: String, required: false },
+    emergencyContact: { type: String, required: false },
+    occupation: { type: String, required: false }
   },
   
   // Fee Information

@@ -81,26 +81,44 @@ const studentSchema = new mongoose.Schema({
     trim: true
   },
 
-  // Parent/Guardian Information
-  parentName: {
+  // Family Information
+  fatherName: {
+    type: String,
+    trim: true
+  },
+  fatherContact: {
+    type: String,
+    trim: true
+  },
+  motherName: {
+    type: String,
+    trim: true
+  },
+  motherContact: {
+    type: String,
+    trim: true
+  },
+  guardianName: {
     type: String,
     required: true,
     trim: true
   },
-  parentPhone: {
+  guardianContact: {
     type: String,
     required: true,
     trim: true
   },
-  parentEmail: {
-    type: String,
-    lowercase: true,
-    trim: true
-  },
-  emergencyContact: {
+  guardianEmail: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
+    lowercase: true
+  },
+  guardianType: {
+    type: String,
+    required: true,
+    enum: ["Father", "Mother", "Other"],
+    default: "Father"
   },
 
   // Medical Information
