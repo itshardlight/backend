@@ -133,7 +133,7 @@ router.get('/students', authenticateToken, requireFeeOrAdmin, async (req, res) =
         const totalFee = feeInfo.totalFee || 0;
         const paidAmount = feeInfo.paidAmount || 0;
         const pendingAmount = totalFee - paidAmount;
-        
+        dd 
         switch (paymentStatus) {
           case 'paid':
             return pendingAmount <= 0 && totalFee > 0;
@@ -229,7 +229,9 @@ router.post('/payment', authenticateToken, requireFeeOrAdmin, async (req, res) =
       });
     }
 
-    if (parseFloat(amount) <= 0) {
+    const paymentAmount = parseFloat(amount);
+    
+    if (paymentAmount <= 0) {
       return res.status(400).json({
         success: false,
         message: 'Payment amount must be greater than 0'
@@ -310,9 +312,36 @@ router.post('/payment', authenticateToken, requireFeeOrAdmin, async (req, res) =
     }
 
     const currentFeeInfo = profile.feeInfo || {};
-    const paymentAmount = parseFloat(amount);
-    const newPaidAmount = (currentFeeInfo.paidAmount || 0) + paymentAmount;
     const totalFee = currentFeeInfo.totalFee || 0;
+    const currentPaidAmount = currentFeeInfo.paidAmount || 0;
+    const currentPendingAmount = totalFee - currentPaidAmount;
+
+    // Validate payment amount doesn't exceed pending amount
+    if (totalFee === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No fee structure set for this student. Please set the fee structure first.'
+      });
+    }
+
+    if (currentPendingAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'All fees have been paid. No pending amount for this student.'
+      });
+    }
+
+    if (paymentAmount > currentPendingAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment amount (Rs.${paymentAmount}) cannot exceed pending amount (Rs.${currentPendingAmount})`,
+        pendingAmount: currentPendingAmount,
+        totalFee: totalFee,
+        paidAmount: currentPaidAmount
+      });
+    }
+
+    const newPaidAmount = currentPaidAmount + paymentAmount;
     const newPendingAmount = Math.max(0, totalFee - newPaidAmount);
 
     // Create payment record

@@ -124,6 +124,45 @@ router.post('/esewa/initialize', authenticateToken, async (req, res) => {
       });
     }
 
+    // Validate payment amount against pending fee
+    const Profile = (await import('../models/Profile.js')).default;
+    const profile = await Profile.findOne({ userId: req.user.id });
+    
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student profile not found'
+      });
+    }
+
+    const feeInfo = profile.feeInfo || {};
+    const totalFee = feeInfo.totalFee || 0;
+    const paidAmount = feeInfo.paidAmount || 0;
+    const pendingAmount = totalFee - paidAmount;
+
+    if (totalFee === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No fee structure set for this student. Please contact administration.'
+      });
+    }
+
+    if (pendingAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'All fees have been paid. No pending amount.'
+      });
+    }
+
+    const numericAmount = parseFloat(amount);
+    if (numericAmount > pendingAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment amount (Rs.${numericAmount}) cannot exceed pending amount (Rs.${pendingAmount})`,
+        pendingAmount: pendingAmount
+      });
+    }
+
     // Get eSewa configuration from environment
     const secretKey = process.env.ESEWA_SECRET_KEY;
     const productCode = process.env.ESEWA_PRODUCT_CODE || 'EPAYTEST';
@@ -137,16 +176,8 @@ router.post('/esewa/initialize', authenticateToken, async (req, res) => {
     }
 
     // Convert amounts to numbers and validate (simple amounts, not paisa)
-    const numericAmount = parseFloat(amount);
     const numericTaxAmount = parseFloat(taxAmount);
     
-    if (isNaN(numericAmount) || numericAmount <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid payment amount'
-      });
-    }
-
     if (isNaN(numericTaxAmount) || numericTaxAmount < 0) {
       return res.status(400).json({
         success: false,
