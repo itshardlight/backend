@@ -10,7 +10,7 @@ const timetableSchema = new mongoose.Schema({
   section: {
     type: String,
     required: true,
-    enum: ["A", "B", "C"]
+    enum: ["A", "B", "C", "D"]
   },
   
   // Schedule Information
@@ -32,15 +32,13 @@ const timetableSchema = new mongoose.Schema({
     trim: true
   },
   
-  // Teacher Information
+  // Teacher Information (optional)
   teacherId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+    ref: 'User'
   },
   teacherName: {
     type: String,
-    required: true,
     trim: true
   },
   
@@ -81,7 +79,10 @@ const timetableSchema = new mongoose.Schema({
 });
 
 // Compound index for efficient queries
-timetableSchema.index({ class: 1, section: 1, dayOfWeek: 1, period: 1 }, { unique: true });
+timetableSchema.index({ class: 1, section: 1, dayOfWeek: 1, period: 1, isActive: 1 }, { 
+  unique: true,
+  partialFilterExpression: { isActive: true }
+});
 timetableSchema.index({ teacherId: 1, dayOfWeek: 1, period: 1 });
 
 const Timetable = mongoose.model("Timetable", timetableSchema);
