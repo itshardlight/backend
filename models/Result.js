@@ -186,8 +186,13 @@ resultSchema.pre('save', function(next) {
   // Calculate overall grade
   this.overallGrade = calculateGrade(this.percentage);
   
-  // Determine pass/fail
-  this.result = this.percentage >= 33 ? 'pass' : 'fail';
+  // Determine pass/fail - fail if any subject is below 33% OR overall percentage is below 33%
+  const hasFailingSubject = this.subjects.some(subject => {
+    const subjectPercentage = (subject.obtainedMarks / subject.maxMarks) * 100;
+    return subjectPercentage < 33;
+  });
+  
+  this.result = (this.percentage >= 33 && !hasFailingSubject) ? 'pass' : 'fail';
   
   next();
 });
