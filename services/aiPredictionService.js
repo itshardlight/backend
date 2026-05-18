@@ -1,228 +1,354 @@
-import axios from 'axios';
 import Result from '../models/Result.js';
 import Student from '../models/Student.js';
 import Attendance from '../models/Attendance.js';
 
 class AIPredictionService {
   constructor() {
-    // Hugging Face API configuration
-    this.hfApiKey = process.env.HUGGING_FACE_API_KEY;
-    this.hfApiUrl = 'https://api-inference.huggingface.co/models';
+    // Random Forest configuration
+    this.performanceThreshold = 60; // Threshold for good/bad performance classification
+    this.minDataPoints = 3; // Minimum number of results needed for prediction
+  }
+
+  // Random Forest implementation for performance prediction
+  randomForestPredict(features) {
+    // Simple Random Forest implementation using decision trees
+    const trees = this.createRandomForestTrees();
+    let predictions = [];
+
+    // Get prediction from each tree
+    for (let tree of trees) {
+      predictions.push(this.predictWithTree(tree, features));
+    }
+
+    // Majority voting
+    const goodCount = predictions.filter(p => p === 'good').length;
+    const badCount = predictions.filter(p => p === 'bad').length;
     
-    // Different HF models for different tasks
-    this.models = {
-      textGeneration: 'microsoft/DialoGPT-medium',
-      sentimentAnalysis: 'cardiffnlp/twitter-roberta-base-sentiment-latest',
-      textClassification: 'facebook/bart-large-mnli',
-      summarization: 'facebook/bart-large-cnn',
-      questionAnswering: 'deepset/roberta-base-squad2'
+    const prediction = goodCount > badCount ? 'good' : 'bad';
+    const confidence = Math.max(goodCount, badCount) / predictions.length;
+
+    return {
+      prediction,
+      confidence: Math.round(confidence * 100),
+      details: {
+        goodVotes: goodCount,
+        badVotes: badCount,
+        totalTrees: predictions.length
+      }
     };
-    
-    // Initialize axios instance for HF API calls
-    this.hfClient = axios.create({
-      baseURL: this.hfApiUrl,
-      headers: {
-        'Authorization': `Bearer ${this.hfApiKey}`,
-        'Content-Type': 'application/json'
+  }
+
+  // Create multiple decision trees for Random Forest
+  createRandomForestTrees() {
+    return [
+      // Tree 1: Focus on attendance and recent performance
+      {
+        name: 'attendance_performance_tree',
+        rules: [
+          { condition: (f) => f.attendancePercentage >= 85 && f.recentAverage >= 70, result: 'good' },
+          { condition: (f) => f.attendancePercentage < 60 || f.recentAverage < 40, result: 'bad' },
+          { condition: (f) => f.attendancePercentage >= 75 && f.recentAverage >= 55, result: 'good' },
+          { condition: (f) => true, result: 'bad' } // default
+        ]
       },
-      timeout: 30000 // 30 second timeout
-    });
+      // Tree 2: Focus on trend and consistency
+      {
+        name: 'trend_consistency_tree',
+        rules: [
+          { condition: (f) => f.trend === 'improving' && f.consistencyScore >= 70, result: 'good' },
+          { condition: (f) => f.trend === 'declining' && f.consistencyScore < 50, result: 'bad' },
+          { condition: (f) => f.overallAverage >= 65 && f.consistencyScore >= 60, result: 'good' },
+          { condition: (f) => f.overallAverage < 45, result: 'bad' },
+          { condition: (f) => true, result: 'good' } // default
+        ]
+      },
+      // Tree 3: Focus on overall performance and exam count
+      {
+        name: 'performance_experience_tree',
+        rules: [
+          { condition: (f) => f.overallAverage >= 75 && f.examCount >= 5, result: 'good' },
+          { condition: (f) => f.overallAverage < 50 && f.examCount >= 3, result: 'bad' },
+          { condition: (f) => f.recentAverage >= 60 && f.attendancePercentage >= 70, result: 'good' },
+          { condition: (f) => f.recentAverage < 45 || f.attendancePercentage < 65, result: 'bad' },
+          { condition: (f) => true, result: 'good' } // default
+        ]
+      },
+      // Tree 4: Focus on subject performance variation
+      {
+        name: 'subject_variation_tree',
+        rules: [
+          { condition: (f) => f.subjectVariation < 15 && f.overallAverage >= 60, result: 'good' },
+          { condition: (f) => f.subjectVariation > 25 && f.overallAverage < 55, result: 'bad' },
+          { condition: (f) => f.bestSubjectScore >= 80 && f.worstSubjectScore >= 50, result: 'good' },
+          { condition: (f) => f.worstSubjectScore < 35, result: 'bad' },
+          { condition: (f) => true, result: 'good' } // default
+        ]
+      },
+      // Tree 5: Focus on recent trends and attendance patterns
+      {
+        name: 'recent_patterns_tree',
+        rules: [
+          { condition: (f) => f.recentTrend === 'improving' && f.attendancePercentage >= 80, result: 'good' },
+          { condition: (f) => f.recentTrend === 'declining' && f.attendancePercentage < 70, result: 'bad' },
+          { condition: (f) => f.recentAverage >= f.overallAverage + 5, result: 'good' },
+          { condition: (f) => f.recentAverage < f.overallAverage - 10, result: 'bad' },
+          { condition: (f) => f.attendancePercentage >= 75, result: 'good' },
+          { condition: (f) => true, result: 'bad' } // default
+        ]
+      }
+    ];
   }
 
-  // Helper method to call Hugging Face API
-  async callHuggingFaceAPI(modelName, payload, retries = 3) {
-    try {
-      const response = await this.hfClient.post(`/${modelName}`, payload);
-      return response.data;
-    } catch (error) {
-      if (error.response?.status === 503 && retries > 0) {
-        // Model is loading, wait and retry
-        console.log(`Model ${modelName} is loading, retrying in 5 seconds...`);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        return this.callHuggingFaceAPI(modelName, payload, retries - 1);
+  // Predict using a single decision tree
+  predictWithTree(tree, features) {
+    for (let rule of tree.rules) {
+      if (rule.condition(features)) {
+        return rule.result;
       }
+    }
+    return 'good'; // fallback
+  }
+
+  // Extract features from student data for Random Forest
+  extractFeatures(studentData, results, attendancePercentage) {
+    if (!results || results.length === 0) {
+      return {
+        overallAverage: 50, // default
+        recentAverage: 50,
+        attendancePercentage: attendancePercentage || 75,
+        trend: 'stable',
+        recentTrend: 'stable',
+        consistencyScore: 50,
+        examCount: 0,
+        subjectVariation: 20,
+        bestSubjectScore: 60,
+        worstSubjectScore: 40,
+        hasInsufficientData: true
+      };
+    }
+
+    // Calculate overall average
+    const overallAverage = results.reduce((sum, r) => sum + r.percentage, 0) / results.length;
+
+    // Calculate recent average (last 3 exams)
+    const recentResults = results.slice(-3);
+    const recentAverage = recentResults.reduce((sum, r) => sum + r.percentage, 0) / recentResults.length;
+
+    // Calculate trend
+    const midPoint = Math.floor(results.length / 2);
+    const firstHalf = results.slice(0, midPoint);
+    const secondHalf = results.slice(midPoint);
+    
+    let trend = 'stable';
+    let recentTrend = 'stable';
+    
+    if (firstHalf.length > 0 && secondHalf.length > 0) {
+      const firstAvg = firstHalf.reduce((sum, r) => sum + r.percentage, 0) / firstHalf.length;
+      const secondAvg = secondHalf.reduce((sum, r) => sum + r.percentage, 0) / secondHalf.length;
       
-      console.error(`Hugging Face API error for ${modelName}:`, error.response?.data || error.message);
-      throw new Error(`Hugging Face API error: ${error.response?.data?.error || error.message}`);
-    }
-  }
-
-  // Generate AI-powered recommendations using Hugging Face
-  async generateAIRecommendations(studentData, performanceData) {
-    if (!this.hfApiKey) {
-      console.log('Hugging Face API key not configured, using rule-based recommendations');
-      return this.generateRecommendations(
-        performanceData.predictedMarks || performanceData.averagePercentage,
-        performanceData.averagePastMarks || performanceData.averagePercentage,
-        performanceData.attendancePercentage || 75
-      );
+      if (secondAvg > firstAvg + 5) trend = 'improving';
+      else if (secondAvg < firstAvg - 5) trend = 'declining';
     }
 
-    try {
-      // Create a context for the AI model
-      const context = `
-Student Performance Analysis:
-- Name: ${studentData.name}
-- Class: ${studentData.class} ${studentData.section}
-- Average Performance: ${performanceData.averagePercentage || performanceData.predictedMarks}%
-- Attendance: ${performanceData.attendancePercentage || 'N/A'}%
-- Trend: ${performanceData.trend || 'stable'}
-- Risk Level: ${performanceData.riskLevel || 'medium'}
-- Consistency Score: ${performanceData.consistencyScore || 'N/A'}
+    // Recent trend (last 3 vs previous 3)
+    if (results.length >= 6) {
+      const previousThree = results.slice(-6, -3);
+      const lastThree = results.slice(-3);
+      
+      const prevAvg = previousThree.reduce((sum, r) => sum + r.percentage, 0) / previousThree.length;
+      const lastAvg = lastThree.reduce((sum, r) => sum + r.percentage, 0) / lastThree.length;
+      
+      if (lastAvg > prevAvg + 3) recentTrend = 'improving';
+      else if (lastAvg < prevAvg - 3) recentTrend = 'declining';
+    }
 
-Generate specific, actionable recommendations for this student to improve their academic performance.
-      `.trim();
+    // Calculate consistency score (inverse of standard deviation)
+    const percentages = results.map(r => r.percentage);
+    const variance = percentages.reduce((sum, p) => sum + Math.pow(p - overallAverage, 2), 0) / percentages.length;
+    const stdDev = Math.sqrt(variance);
+    const consistencyScore = Math.max(0, 100 - stdDev);
 
-      // Use text generation to create personalized recommendations
-      const response = await this.callHuggingFaceAPI(this.models.textGeneration, {
-        inputs: context,
-        parameters: {
-          max_length: 200,
-          temperature: 0.7,
-          do_sample: true,
-          top_p: 0.9
-        }
+    // Subject performance analysis
+    let subjectScores = [];
+    let subjectVariation = 20; // default
+    let bestSubjectScore = overallAverage;
+    let worstSubjectScore = overallAverage;
+
+    // Extract subject scores from recent results
+    const recentResultsWithSubjects = results.filter(r => r.subjects && r.subjects.length > 0).slice(-3);
+    if (recentResultsWithSubjects.length > 0) {
+      const subjectMap = {};
+      
+      recentResultsWithSubjects.forEach(result => {
+        result.subjects.forEach(subject => {
+          if (!subjectMap[subject.subjectName]) {
+            subjectMap[subject.subjectName] = [];
+          }
+          const percentage = (subject.obtainedMarks / subject.maxMarks) * 100;
+          subjectMap[subject.subjectName].push(percentage);
+        });
       });
 
-      // Parse and format the AI response
-      let aiRecommendations = [];
-      if (response && response[0] && response[0].generated_text) {
-        const generatedText = response[0].generated_text.replace(context, '').trim();
-        aiRecommendations = generatedText.split('\n')
-          .filter(line => line.trim().length > 0)
-          .map(line => line.trim().replace(/^[-•*]\s*/, ''))
-          .slice(0, 5); // Limit to 5 recommendations
-      }
-
-      // Fallback to rule-based if AI doesn't generate good recommendations
-      if (aiRecommendations.length === 0) {
-        aiRecommendations = this.generateRecommendations(
-          performanceData.predictedMarks || performanceData.averagePercentage,
-          performanceData.averagePastMarks || performanceData.averagePercentage,
-          performanceData.attendancePercentage || 75
-        );
-      }
-
-      return aiRecommendations;
-    } catch (error) {
-      console.error('Error generating AI recommendations:', error.message);
-      // Fallback to rule-based recommendations
-      return this.generateRecommendations(
-        performanceData.predictedMarks || performanceData.averagePercentage,
-        performanceData.averagePastMarks || performanceData.averagePercentage,
-        performanceData.attendancePercentage || 75
-      );
-    }
-  }
-
-  // Analyze student feedback/comments using sentiment analysis
-  async analyzeFeedbackSentiment(feedbackText) {
-    if (!this.hfApiKey || !feedbackText) {
-      return { sentiment: 'neutral', confidence: 0.5 };
-    }
-
-    try {
-      const response = await this.callHuggingFaceAPI(this.models.sentimentAnalysis, {
-        inputs: feedbackText
+      // Calculate average for each subject
+      Object.keys(subjectMap).forEach(subjectName => {
+        const scores = subjectMap[subjectName];
+        const avgScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+        subjectScores.push(avgScore);
       });
 
-      if (response && response[0] && response[0].length > 0) {
-        const result = response[0][0];
-        return {
-          sentiment: result.label.toLowerCase(),
-          confidence: result.score
-        };
+      if (subjectScores.length > 1) {
+        bestSubjectScore = Math.max(...subjectScores);
+        worstSubjectScore = Math.min(...subjectScores);
+        subjectVariation = bestSubjectScore - worstSubjectScore;
       }
-
-      return { sentiment: 'neutral', confidence: 0.5 };
-    } catch (error) {
-      console.error('Error analyzing sentiment:', error.message);
-      return { sentiment: 'neutral', confidence: 0.5 };
     }
+
+    return {
+      overallAverage: Math.round(overallAverage * 100) / 100,
+      recentAverage: Math.round(recentAverage * 100) / 100,
+      attendancePercentage: attendancePercentage || 75,
+      trend,
+      recentTrend,
+      consistencyScore: Math.round(consistencyScore * 100) / 100,
+      examCount: results.length,
+      subjectVariation: Math.round(subjectVariation * 100) / 100,
+      bestSubjectScore: Math.round(bestSubjectScore * 100) / 100,
+      worstSubjectScore: Math.round(worstSubjectScore * 100) / 100,
+      hasInsufficientData: results.length < this.minDataPoints
+    };
   }
-
-  // Generate detailed performance summary using AI
-  async generatePerformanceSummary(studentData, performanceData) {
-    if (!this.hfApiKey) {
-      return `${studentData.name} has an average performance of ${performanceData.averagePercentage || performanceData.predictedMarks}% with ${performanceData.riskLevel || 'medium'} risk level.`;
-    }
-
+  // Predict student performance using Random Forest
+  async predictStudentPerformance(studentId) {
     try {
-      const context = `
-Summarize the academic performance of ${studentData.name}:
-- Class: ${studentData.class} ${studentData.section}
-- Average Performance: ${performanceData.averagePercentage || performanceData.predictedMarks}%
-- Attendance: ${performanceData.attendancePercentage || 'N/A'}%
-- Performance Trend: ${performanceData.trend || 'stable'}
-- Risk Level: ${performanceData.riskLevel || 'medium'}
-- Consistency: ${performanceData.consistencyScore || 'N/A'}
-
-Provide a concise, professional summary in 2-3 sentences.
-      `.trim();
-
-      const response = await this.callHuggingFaceAPI(this.models.summarization, {
-        inputs: context,
-        parameters: {
-          max_length: 100,
-          min_length: 30
-        }
-      });
-
-      if (response && response[0] && response[0].summary_text) {
-        return response[0].summary_text;
+      console.log(`Starting Random Forest prediction for student: ${studentId}`);
+      
+      const student = await Student.findById(studentId);
+      if (!student) {
+        throw new Error('Student not found');
       }
 
-      // Fallback summary
-      return `${studentData.name} demonstrates ${performanceData.averagePercentage || performanceData.predictedMarks}% average performance with a ${performanceData.trend || 'stable'} trend and ${performanceData.riskLevel || 'medium'} risk level.`;
+      console.log(`Found student: ${student.firstName} ${student.lastName}`);
+
+      // Get student's exam results
+      const results = await Result.find({ 
+        studentId: studentId,
+        status: { $in: ['published', 'verified', 'locked'] }
+      }).sort({ createdAt: 1 });
+
+      // Get attendance percentage
+      const attendancePercentage = await this.calculateAttendancePercentage(studentId);
+      console.log(`Attendance percentage: ${attendancePercentage}`);
+
+      // Extract features for Random Forest
+      const features = this.extractFeatures(student, results, attendancePercentage);
+      console.log('Extracted features:', features);
+
+      // Use Random Forest to predict performance
+      const rfPrediction = this.randomForestPredict(features);
+      console.log('Random Forest prediction:', rfPrediction);
+
+      // Convert prediction to traditional format
+      const willPerformWell = rfPrediction.prediction === 'good';
+      const predictedMarks = willPerformWell ? 
+        Math.max(65, features.recentAverage + 5) : 
+        Math.min(55, features.recentAverage - 5);
+
+      let predictedGrade;
+      if (predictedMarks >= 90) predictedGrade = 'A+';
+      else if (predictedMarks >= 80) predictedGrade = 'A';
+      else if (predictedMarks >= 70) predictedGrade = 'B+';
+      else if (predictedMarks >= 60) predictedGrade = 'B';
+      else if (predictedMarks >= 50) predictedGrade = 'C+';
+      else if (predictedMarks >= 40) predictedGrade = 'C';
+      else if (predictedMarks >= 33) predictedGrade = 'D';
+      else predictedGrade = 'F';
+
+      const riskLevel = willPerformWell ? 'low' : 'high';
+
+      // Generate recommendations based on Random Forest analysis
+      const recommendations = this.generateRandomForestRecommendations(features, rfPrediction);
+
+      console.log(`Random Forest prediction successful for student ${studentId}: ${rfPrediction.prediction} (${rfPrediction.confidence}% confidence)`);
+
+      return {
+        success: true,
+        student: {
+          id: student._id,
+          name: `${student.firstName} ${student.lastName}`,
+          class: student.class,
+          section: student.section,
+          rollNumber: student.rollNumber
+        },
+        prediction: {
+          nextExamPerformance: rfPrediction.prediction, // 'good' or 'bad'
+          confidence: rfPrediction.confidence,
+          predictedMarks: Math.round(predictedMarks * 100) / 100,
+          predictedGrade: predictedGrade,
+          riskLevel: riskLevel,
+          recommendations: recommendations,
+          modelType: 'Random Forest'
+        },
+        features: features,
+        randomForestDetails: rfPrediction.details,
+        analysisDate: new Date(),
+        dataPoints: results.length
+      };
     } catch (error) {
-      console.error('Error generating performance summary:', error.message);
-      return `${studentData.name} has an average performance of ${performanceData.averagePercentage || performanceData.predictedMarks}% with ${performanceData.riskLevel || 'medium'} risk level.`;
+      console.error(`Error in Random Forest prediction for ${studentId}:`, error);
+      throw new Error(`Error predicting student performance: ${error.message}`);
     }
   }
 
-  // Advanced prediction using Hugging Face (experimental)
-  async generateAdvancedPrediction(studentData, performanceData) {
-    if (!this.hfApiKey) {
-      return null; // Fall back to existing prediction method
+  // Generate recommendations based on Random Forest analysis
+  generateRandomForestRecommendations(features, rfPrediction) {
+    const recommendations = [];
+
+    // Base recommendation based on prediction
+    if (rfPrediction.prediction === 'bad') {
+      recommendations.push(`⚠️ Random Forest predicts poor performance in next exam (${rfPrediction.confidence}% confidence)`);
+      recommendations.push('Immediate intervention recommended');
+    } else {
+      recommendations.push(`✅ Random Forest predicts good performance in next exam (${rfPrediction.confidence}% confidence)`);
+      recommendations.push('Continue current study approach');
     }
 
-    try {
-      // Create a detailed prompt for the AI model
-      const prompt = `
-Based on the following student data, predict the likelihood of academic success:
-
-Student Profile:
-- Current Average: ${performanceData.averagePercentage || performanceData.predictedMarks}%
-- Attendance Rate: ${performanceData.attendancePercentage || 75}%
-- Performance Trend: ${performanceData.trend || 'stable'}
-- Consistency Score: ${performanceData.consistencyScore || 70}
-- Number of Exams: ${performanceData.numberOfExams || 0}
-
-Question: What is the predicted performance category for this student?
-Options: Excellent (90-100%), Good (70-89%), Average (50-69%), Poor (below 50%)
-      `.trim();
-
-      const response = await this.callHuggingFaceAPI(this.models.questionAnswering, {
-        inputs: {
-          question: "What is the predicted performance category for this student?",
-          context: prompt
-        }
-      });
-
-      if (response && response.answer) {
-        return {
-          aiPrediction: response.answer,
-          confidence: response.score || 0.5,
-          source: 'huggingface'
-        };
-      }
-
-      return null;
-    } catch (error) {
-      console.error('Error generating advanced prediction:', error.message);
-      return null;
+    // Feature-specific recommendations
+    if (features.attendancePercentage < 75) {
+      recommendations.push(`📅 Improve attendance (currently ${features.attendancePercentage.toFixed(1)}%)`);
     }
+
+    if (features.trend === 'declining' || features.recentTrend === 'declining') {
+      recommendations.push('📉 Address declining performance trend');
+    }
+
+    if (features.consistencyScore < 60) {
+      recommendations.push('🎯 Work on maintaining consistent performance');
+    }
+
+    if (features.subjectVariation > 20) {
+      recommendations.push(`📚 Focus on weaker subjects (${features.subjectVariation.toFixed(1)}% variation between subjects)`);
+    }
+
+    if (features.recentAverage < features.overallAverage - 5) {
+      recommendations.push('📈 Recent performance below average - review study methods');
+    }
+
+    if (features.hasInsufficientData) {
+      recommendations.push('📊 Limited exam data available - prediction based on attendance and defaults');
+    }
+
+    // Positive reinforcements
+    if (features.trend === 'improving') {
+      recommendations.push('🚀 Great improvement trend - keep it up!');
+    }
+
+    if (features.attendancePercentage >= 85) {
+      recommendations.push('👏 Excellent attendance - maintain this discipline');
+    }
+
+    return recommendations.slice(0, 6); // Limit to 6 recommendations
   }
+
   async calculateAttendancePercentage(studentId) {
     try {
       // Get attendance data for the current academic year (last 365 days)
@@ -242,7 +368,6 @@ Options: Excellent (90-100%), Good (70-89%), Average (50-69%), Poor (below 50%)
       return 75; // Default attendance percentage if calculation fails
     }
   }
-
   // Calculate average past marks for a student
   async calculateAveragePastMarks(studentId) {
     try {
@@ -275,149 +400,9 @@ Options: Excellent (90-100%), Good (70-89%), Average (50-69%), Poor (below 50%)
     }
   }
 
-  // Predict student marks using the formula: Predicted Marks = (0.7 × Average Past Marks) + (0.3 × Attendance %)
+  // Legacy method for backward compatibility - now uses Random Forest
   async predictStudentMarks(studentId) {
-    try {
-      console.log(`Starting prediction for student: ${studentId}`);
-      
-      const student = await Student.findById(studentId);
-      if (!student) {
-        throw new Error('Student not found');
-      }
-
-      console.log(`Found student: ${student.firstName} ${student.lastName}`);
-
-      // Get average past marks
-      const averagePastMarks = await this.calculateAveragePastMarks(studentId);
-      console.log(`Average past marks: ${averagePastMarks}`);
-      
-      // Get attendance percentage
-      const attendancePercentage = await this.calculateAttendancePercentage(studentId);
-      console.log(`Attendance percentage: ${attendancePercentage}`);
-
-      if (averagePastMarks === null) {
-        console.log(`No exam results found for student ${studentId}, using default prediction based on attendance only`);
-        
-        // If no past marks, use attendance-based prediction with a base score
-        const baseScore = 50; // Assume average baseline performance
-        const predictedMarks = (0.3 * baseScore) + (0.7 * attendancePercentage); // Give more weight to attendance when no results
-        
-        let predictedGrade;
-        if (predictedMarks >= 90) predictedGrade = 'A+';
-        else if (predictedMarks >= 80) predictedGrade = 'A';
-        else if (predictedMarks >= 70) predictedGrade = 'B+';
-        else if (predictedMarks >= 60) predictedGrade = 'B';
-        else if (predictedMarks >= 50) predictedGrade = 'C+';
-        else if (predictedMarks >= 40) predictedGrade = 'C';
-        else if (predictedMarks >= 33) predictedGrade = 'D';
-        else predictedGrade = 'F';
-
-        let riskLevel;
-        if (predictedMarks < 40) riskLevel = 'high';
-        else if (predictedMarks < 60) riskLevel = 'medium';
-        else riskLevel = 'low';
-
-        return {
-          success: true,
-          student: {
-            id: student._id,
-            name: `${student.firstName} ${student.lastName}`,
-            class: student.class,
-            section: student.section,
-            rollNumber: student.rollNumber
-          },
-          prediction: {
-            predictedMarks: Math.round(predictedMarks * 100) / 100,
-            predictedGrade: predictedGrade,
-            riskLevel: riskLevel,
-            confidence: 40, // Lower confidence without exam data
-            recommendations: [
-              'No past exam results available',
-              'Prediction based on attendance only',
-              'Need to take exams to improve prediction accuracy',
-              attendancePercentage < 75 ? 'Improve attendance for better performance' : 'Good attendance - maintain it'
-            ]
-          },
-          dataUsed: {
-            averagePastMarks: null, // Use null instead of string for consistency
-            attendancePercentage: Math.round(attendancePercentage * 100) / 100,
-            numberOfExams: 0,
-            formula: 'Predicted Marks = (0.3 × Base Score) + (0.7 × Attendance %) [No exam data available]'
-          },
-          calculationBreakdown: {
-            pastMarksContribution: 'No exam data',
-            attendanceContribution: Math.round((0.7 * attendancePercentage) * 100) / 100,
-            baseScoreContribution: Math.round((0.3 * baseScore) * 100) / 100,
-            totalPrediction: Math.round(predictedMarks * 100) / 100
-          }
-        };
-      }
-
-      // Apply the prediction formula: Predicted Marks = (0.7 × Average Past Marks) + (0.3 × Attendance %)
-      const predictedMarks = (0.7 * averagePastMarks) + (0.3 * attendancePercentage);
-      console.log(`Predicted marks: ${predictedMarks}`);
-
-      // Determine predicted grade based on predicted marks
-      let predictedGrade;
-      if (predictedMarks >= 90) predictedGrade = 'A+';
-      else if (predictedMarks >= 80) predictedGrade = 'A';
-      else if (predictedMarks >= 70) predictedGrade = 'B+';
-      else if (predictedMarks >= 60) predictedGrade = 'B';
-      else if (predictedMarks >= 50) predictedGrade = 'C+';
-      else if (predictedMarks >= 40) predictedGrade = 'C';
-      else if (predictedMarks >= 33) predictedGrade = 'D';
-      else predictedGrade = 'F';
-
-      // Determine risk level
-      let riskLevel;
-      if (predictedMarks < 40) riskLevel = 'high';
-      else if (predictedMarks < 60) riskLevel = 'medium';
-      else riskLevel = 'low';
-
-      // Generate recommendations based on prediction
-      const recommendations = this.generateRecommendations(predictedMarks, averagePastMarks, attendancePercentage);
-
-      // Calculate confidence based on data availability
-      const resultsCount = await Result.countDocuments({ 
-        studentId: studentId,
-        status: { $in: ['published', 'verified', 'locked'] }
-      });
-      const confidence = Math.min(95, Math.max(60, 60 + (resultsCount * 5))); // Higher confidence with more data
-
-      console.log(`Prediction successful for student ${studentId}: ${predictedMarks}% (${predictedGrade})`);
-
-      return {
-        success: true,
-        student: {
-          id: student._id,
-          name: `${student.firstName} ${student.lastName}`,
-          class: student.class,
-          section: student.section,
-          rollNumber: student.rollNumber
-        },
-        prediction: {
-          predictedMarks: Math.round(predictedMarks * 100) / 100,
-          predictedGrade: predictedGrade,
-          riskLevel: riskLevel,
-          confidence: confidence,
-          recommendations: recommendations
-        },
-        dataUsed: {
-          averagePastMarks: Math.round(averagePastMarks * 100) / 100,
-          attendancePercentage: Math.round(attendancePercentage * 100) / 100,
-          numberOfExams: resultsCount,
-          formula: 'Predicted Marks = (0.7 × Average Past Marks) + (0.3 × Attendance %)'
-        },
-        calculationBreakdown: {
-          pastMarksContribution: Math.round((0.7 * averagePastMarks) * 100) / 100,
-          attendanceContribution: Math.round((0.3 * attendancePercentage) * 100) / 100,
-          totalPrediction: Math.round(predictedMarks * 100) / 100
-        }
-      };
-    } catch (error) {
-      console.error(`Error predicting student marks for ${studentId}:`, error);
-      throw new Error(`Error predicting student marks: ${error.message}`);
-    }
+    return await this.predictStudentPerformance(studentId);
   }
 
   // Generate recommendations based on prediction components
@@ -462,317 +447,7 @@ Options: Excellent (90-100%), Good (70-89%), Average (50-69%), Poor (below 50%)
     return recommendations;
   }
 
-  // Prepare student data for AI analysis
-  async prepareStudentData(studentId) {
-    try {
-      const student = await Student.findById(studentId);
-      if (!student) {
-        throw new Error('Student not found');
-      }
-
-      // Get all results for the student
-      const results = await Result.find({ 
-        studentId: studentId,
-        status: { $in: ['published', 'verified', 'locked'] }
-      }).sort({ createdAt: 1 });
-
-      if (results.length === 0) {
-        return {
-          student,
-          hasData: false,
-          message: 'No academic data available for prediction'
-        };
-      }
-
-      // Calculate performance metrics
-      const performanceData = this.calculatePerformanceMetrics(results);
-      
-      return {
-        student,
-        hasData: true,
-        results,
-        performanceData
-      };
-    } catch (error) {
-      throw new Error(`Error preparing student data: ${error.message}`);
-    }
-  }
-
-  // Calculate performance metrics from results
-  calculatePerformanceMetrics(results) {
-    const metrics = {
-      averagePercentage: 0,
-      trend: 'stable', // improving, declining, stable
-      consistencyScore: 0,
-      subjectPerformance: {},
-      examTypePerformance: {},
-      recentPerformance: 0,
-      overallGradeDistribution: {}
-    };
-
-    if (results.length === 0) return metrics;
-
-    // Calculate average percentage
-    const totalPercentage = results.reduce((sum, result) => sum + result.percentage, 0);
-    metrics.averagePercentage = Math.round((totalPercentage / results.length) * 100) / 100;
-
-    // Calculate trend (comparing first half vs second half)
-    const midPoint = Math.floor(results.length / 2);
-    const firstHalf = results.slice(0, midPoint);
-    const secondHalf = results.slice(midPoint);
-
-    if (firstHalf.length > 0 && secondHalf.length > 0) {
-      const firstHalfAvg = firstHalf.reduce((sum, r) => sum + r.percentage, 0) / firstHalf.length;
-      const secondHalfAvg = secondHalf.reduce((sum, r) => sum + r.percentage, 0) / secondHalf.length;
-      
-      const difference = secondHalfAvg - firstHalfAvg;
-      if (difference > 5) metrics.trend = 'improving';
-      else if (difference < -5) metrics.trend = 'declining';
-      else metrics.trend = 'stable';
-    }
-
-    // Calculate consistency score (lower standard deviation = higher consistency)
-    const percentages = results.map(r => r.percentage);
-    const mean = metrics.averagePercentage;
-    const variance = percentages.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / percentages.length;
-    const stdDev = Math.sqrt(variance);
-    metrics.consistencyScore = Math.max(0, 100 - stdDev); // Higher score = more consistent
-
-    // Subject performance analysis
-    const subjectMap = {};
-    results.forEach(result => {
-      result.subjects.forEach(subject => {
-        if (!subjectMap[subject.subjectName]) {
-          subjectMap[subject.subjectName] = {
-            totalMarks: 0,
-            totalMaxMarks: 0,
-            count: 0,
-            grades: []
-          };
-        }
-        subjectMap[subject.subjectName].totalMarks += subject.obtainedMarks;
-        subjectMap[subject.subjectName].totalMaxMarks += subject.maxMarks;
-        subjectMap[subject.subjectName].count += 1;
-        subjectMap[subject.subjectName].grades.push(subject.grade);
-      });
-    });
-
-    Object.keys(subjectMap).forEach(subjectName => {
-      const subject = subjectMap[subjectName];
-      metrics.subjectPerformance[subjectName] = {
-        averagePercentage: Math.round((subject.totalMarks / subject.totalMaxMarks) * 100 * 100) / 100,
-        examCount: subject.count,
-        mostCommonGrade: this.getMostCommonGrade(subject.grades)
-      };
-    });
-
-    // Exam type performance
-    const examTypeMap = {};
-    results.forEach(result => {
-      if (!examTypeMap[result.examType]) {
-        examTypeMap[result.examType] = {
-          totalPercentage: 0,
-          count: 0
-        };
-      }
-      examTypeMap[result.examType].totalPercentage += result.percentage;
-      examTypeMap[result.examType].count += 1;
-    });
-
-    Object.keys(examTypeMap).forEach(examType => {
-      const exam = examTypeMap[examType];
-      metrics.examTypePerformance[examType] = Math.round((exam.totalPercentage / exam.count) * 100) / 100;
-    });
-
-    // Recent performance (last 3 results)
-    const recentResults = results.slice(-3);
-    if (recentResults.length > 0) {
-      const recentTotal = recentResults.reduce((sum, r) => sum + r.percentage, 0);
-      metrics.recentPerformance = Math.round((recentTotal / recentResults.length) * 100) / 100;
-    }
-
-    // Grade distribution
-    const gradeMap = {};
-    results.forEach(result => {
-      gradeMap[result.overallGrade] = (gradeMap[result.overallGrade] || 0) + 1;
-    });
-    metrics.overallGradeDistribution = gradeMap;
-
-    return metrics;
-  }
-
-  // Get most common grade from array
-  getMostCommonGrade(grades) {
-    const gradeCount = {};
-    grades.forEach(grade => {
-      gradeCount[grade] = (gradeCount[grade] || 0) + 1;
-    });
-    
-    return Object.keys(gradeCount).reduce((a, b) => 
-      gradeCount[a] > gradeCount[b] ? a : b
-    );
-  }
-
-  // Generate AI prediction using rule-based system (fallback if Hugging Face fails)
-  generateRuleBasedPrediction(performanceData) {
-    const { averagePercentage, trend, consistencyScore, recentPerformance, subjectPerformance } = performanceData;
-    
-    let prediction = {
-      predictedGrade: 'C',
-      confidence: 0,
-      riskLevel: 'medium',
-      recommendations: [],
-      futurePerformance: {
-        nextExamPrediction: averagePercentage,
-        semesterPrediction: averagePercentage,
-        yearEndPrediction: averagePercentage
-      }
-    };
-
-    // Predict grade based on average performance
-    if (averagePercentage >= 90) prediction.predictedGrade = 'A+';
-    else if (averagePercentage >= 80) prediction.predictedGrade = 'A';
-    else if (averagePercentage >= 70) prediction.predictedGrade = 'B+';
-    else if (averagePercentage >= 60) prediction.predictedGrade = 'B';
-    else if (averagePercentage >= 50) prediction.predictedGrade = 'C+';
-    else if (averagePercentage >= 40) prediction.predictedGrade = 'C';
-    else if (averagePercentage >= 33) prediction.predictedGrade = 'D';
-    else prediction.predictedGrade = 'F';
-
-    // Calculate confidence based on consistency
-    prediction.confidence = Math.min(95, Math.max(50, consistencyScore));
-
-    // Determine risk level
-    if (averagePercentage < 40 || trend === 'declining') {
-      prediction.riskLevel = 'high';
-    } else if (averagePercentage < 60 || consistencyScore < 70) {
-      prediction.riskLevel = 'medium';
-    } else {
-      prediction.riskLevel = 'low';
-    }
-
-    // Generate recommendations
-    if (prediction.riskLevel === 'high') {
-      prediction.recommendations.push('Immediate intervention required');
-      prediction.recommendations.push('Consider additional tutoring sessions');
-      prediction.recommendations.push('Focus on fundamental concepts');
-    }
-
-    if (trend === 'declining') {
-      prediction.recommendations.push('Performance is declining - investigate causes');
-      prediction.recommendations.push('Increase study time and focus');
-    }
-
-    // Find weak subjects
-    const weakSubjects = Object.keys(subjectPerformance).filter(
-      subject => subjectPerformance[subject].averagePercentage < 50
-    );
-
-    if (weakSubjects.length > 0) {
-      prediction.recommendations.push(`Focus on weak subjects: ${weakSubjects.join(', ')}`);
-    }
-
-    if (consistencyScore < 60) {
-      prediction.recommendations.push('Work on maintaining consistent performance');
-    }
-
-    // Predict future performance based on trend
-    let trendMultiplier = 1;
-    if (trend === 'improving') trendMultiplier = 1.05;
-    else if (trend === 'declining') trendMultiplier = 0.95;
-
-    prediction.futurePerformance.nextExamPrediction = Math.min(100, Math.max(0, 
-      Math.round(recentPerformance * trendMultiplier * 100) / 100
-    ));
-    
-    prediction.futurePerformance.semesterPrediction = Math.min(100, Math.max(0,
-      Math.round(averagePercentage * trendMultiplier * 100) / 100
-    ));
-    
-    prediction.futurePerformance.yearEndPrediction = Math.min(100, Math.max(0,
-      Math.round(averagePercentage * Math.pow(trendMultiplier, 2) * 100) / 100
-    ));
-
-    return prediction;
-  }
-
-  // Generate AI prediction for a single student using the new formula + Hugging Face
-  async predictStudentPerformance(studentId) {
-    try {
-      // Use the new prediction method with the specified formula
-      const prediction = await this.predictStudentMarks(studentId);
-      
-      if (!prediction.success) {
-        return prediction;
-      }
-
-      // Add additional analysis for compatibility with existing UI
-      const results = await Result.find({ 
-        studentId: studentId,
-        status: { $in: ['published', 'verified', 'locked'] }
-      }).sort({ createdAt: 1 });
-
-      let performanceData = null;
-      if (results.length > 0) {
-        performanceData = this.calculatePerformanceMetrics(results);
-      }
-
-      // Enhance with Hugging Face AI capabilities
-      const enhancedData = {
-        ...performanceData,
-        predictedMarks: prediction.prediction.predictedMarks,
-        riskLevel: prediction.prediction.riskLevel,
-        attendancePercentage: prediction.dataUsed.attendancePercentage,
-        averagePastMarks: prediction.dataUsed.averagePastMarks,
-        numberOfExams: prediction.dataUsed.numberOfExams
-      };
-
-      // Generate AI-powered recommendations
-      const aiRecommendations = await this.generateAIRecommendations(
-        prediction.student,
-        enhancedData
-      );
-
-      // Generate performance summary
-      const performanceSummary = await this.generatePerformanceSummary(
-        prediction.student,
-        enhancedData
-      );
-
-      // Try to get advanced AI prediction
-      const advancedPrediction = await this.generateAdvancedPrediction(
-        prediction.student,
-        enhancedData
-      );
-
-      return {
-        success: true,
-        student: prediction.student,
-        prediction: {
-          ...prediction.prediction,
-          recommendations: aiRecommendations, // Use AI-generated recommendations
-          performanceSummary: performanceSummary, // Add AI summary
-          advancedPrediction: advancedPrediction, // Add advanced AI insights
-          futurePerformance: {
-            nextExamPrediction: prediction.prediction.predictedMarks,
-            semesterPrediction: prediction.prediction.predictedMarks,
-            yearEndPrediction: prediction.prediction.predictedMarks
-          }
-        },
-        performanceData: performanceData,
-        dataUsed: prediction.dataUsed,
-        calculationBreakdown: prediction.calculationBreakdown,
-        analysisDate: new Date(),
-        dataPoints: results.length,
-        aiEnhanced: true, // Flag to indicate AI enhancement
-        huggingFaceEnabled: !!this.hfApiKey
-      };
-    } catch (error) {
-      throw new Error(`Error generating prediction: ${error.message}`);
-    }
-  }
-
-  // Analyze all students and categorize using the new prediction formula
+  // Analyze all students using Random Forest
   async analyzeAllStudents(filters = {}) {
     try {
       const { class: className, section, limit = 100 } = filters;
@@ -804,10 +479,10 @@ Options: Excellent (90-100%), Good (70-89%), Average (50-69%), Poor (below 50%)
         return analysis;
       }
 
-      // Analyze each student using the new prediction formula
+      // Analyze each student using Random Forest
       for (const student of students) {
         try {
-          const prediction = await this.predictStudentMarks(student._id);
+          const prediction = await this.predictStudentPerformance(student._id);
           
           if (prediction.success) {
             analysis.analyzedStudents++;
@@ -815,22 +490,15 @@ Options: Excellent (90-100%), Good (70-89%), Average (50-69%), Poor (below 50%)
             const studentAnalysis = {
               student: prediction.student,
               prediction: prediction.prediction,
-              dataUsed: prediction.dataUsed,
-              calculationBreakdown: prediction.calculationBreakdown,
-              performanceData: {
-                averagePercentage: prediction.dataUsed.averagePastMarks !== null ? 
-                  prediction.dataUsed.averagePastMarks : 
-                  prediction.prediction.predictedMarks,
-                trend: 'stable', // Default for new formula
-                consistencyScore: prediction.prediction.confidence
-              }
+              features: prediction.features,
+              randomForestDetails: prediction.randomForestDetails
             };
 
-            // Categorize students based on predicted marks and risk level
-            if (prediction.prediction.riskLevel === 'high' || prediction.prediction.predictedMarks < 40) {
+            // Categorize students based on Random Forest prediction
+            if (prediction.prediction.nextExamPerformance === 'bad' || prediction.prediction.riskLevel === 'high') {
               analysis.weakStudents.push(studentAnalysis);
               analysis.summary.highRisk++;
-            } else if (prediction.prediction.riskLevel === 'medium' || prediction.prediction.predictedMarks < 60) {
+            } else if (prediction.prediction.confidence < 70) {
               analysis.atRiskStudents.push(studentAnalysis);
               analysis.summary.mediumRisk++;
             } else if (prediction.prediction.predictedMarks < 80) {
@@ -850,13 +518,13 @@ Options: Excellent (90-100%), Good (70-89%), Average (50-69%), Poor (below 50%)
         }
       }
 
-      // Sort categories by predicted marks (worst first for intervention)
+      // Sort categories by confidence and predicted performance
       analysis.weakStudents.sort((a, b) => 
-        a.prediction.predictedMarks - b.prediction.predictedMarks
+        a.prediction.confidence - b.prediction.confidence
       );
       
       analysis.atRiskStudents.sort((a, b) => 
-        a.prediction.predictedMarks - b.prediction.predictedMarks
+        a.prediction.confidence - b.prediction.confidence
       );
 
       return analysis;
@@ -866,7 +534,7 @@ Options: Excellent (90-100%), Good (70-89%), Average (50-69%), Poor (below 50%)
     }
   }
 
-  // Get class-wise performance insights with AI enhancement
+  // Get class-wise performance insights using Random Forest
   async getClassInsights(className, section) {
     try {
       const analysis = await this.analyzeAllStudents({ class: className, section });
@@ -877,14 +545,17 @@ Options: Excellent (90-100%), Good (70-89%), Average (50-69%), Poor (below 50%)
         riskDistribution: analysis.summary,
         topConcerns: [],
         recommendations: [],
-        subjectAnalysis: {},
-        aiInsights: null // Will be populated if HF is available
+        modelType: 'Random Forest',
+        analysisDate: new Date()
       };
 
-      // Identify top concerns
-      if (analysis.summary.highRisk > analysis.totalStudents * 0.3) {
-        insights.topConcerns.push('High number of at-risk students');
-        insights.recommendations.push('Implement class-wide intervention program');
+      // Identify top concerns based on Random Forest predictions
+      const badPerformancePredictions = analysis.weakStudents.length;
+      const totalAnalyzed = analysis.analyzedStudents;
+
+      if (badPerformancePredictions > totalAnalyzed * 0.3) {
+        insights.topConcerns.push(`${badPerformancePredictions} students predicted to perform poorly in next exam`);
+        insights.recommendations.push('Implement immediate class-wide intervention');
       }
 
       if (analysis.summary.noData > analysis.totalStudents * 0.2) {
@@ -892,171 +563,33 @@ Options: Excellent (90-100%), Good (70-89%), Average (50-69%), Poor (below 50%)
         insights.recommendations.push('Ensure regular assessment and data collection');
       }
 
-      // Calculate average predicted marks for the class
+      // Calculate average confidence across all predictions
       const studentsWithPredictions = [...analysis.weakStudents, ...analysis.atRiskStudents, ...analysis.averagePerformers, ...analysis.strongPerformers];
       if (studentsWithPredictions.length > 0) {
-        const totalPredictedMarks = studentsWithPredictions.reduce((sum, student) => {
-          return sum + (student.prediction?.predictedMarks || student.performanceData?.averagePercentage || 0);
-        }, 0);
-        const averagePredictedMarks = totalPredictedMarks / studentsWithPredictions.length;
+        const avgConfidence = studentsWithPredictions.reduce((sum, student) => {
+          return sum + (student.prediction?.confidence || 0);
+        }, 0) / studentsWithPredictions.length;
         
-        if (averagePredictedMarks < 50) {
-          insights.topConcerns.push('Class average predicted performance is below 50%');
-          insights.recommendations.push('Implement comprehensive class improvement strategy');
+        if (avgConfidence < 60) {
+          insights.topConcerns.push('Low prediction confidence due to insufficient historical data');
+          insights.recommendations.push('Collect more assessment data to improve prediction accuracy');
         }
 
-        // Generate AI-powered class insights if HF is available
-        if (this.hfApiKey) {
-          try {
-            const classContext = `
-Class Performance Analysis for ${className} ${section}:
-- Total Students: ${analysis.totalStudents}
-- High Risk Students: ${analysis.summary.highRisk}
-- Medium Risk Students: ${analysis.summary.mediumRisk}
-- Low Risk Students: ${analysis.summary.lowRisk}
-- Average Class Performance: ${averagePredictedMarks.toFixed(1)}%
-- Students with No Data: ${analysis.summary.noData}
-
-Generate strategic recommendations for improving overall class performance.
-            `.trim();
-
-            const aiInsights = await this.callHuggingFaceAPI(this.models.textGeneration, {
-              inputs: classContext,
-              parameters: {
-                max_length: 150,
-                temperature: 0.6,
-                do_sample: true
-              }
-            });
-
-            if (aiInsights && aiInsights[0] && aiInsights[0].generated_text) {
-              const generatedInsights = aiInsights[0].generated_text.replace(classContext, '').trim();
-              insights.aiInsights = generatedInsights;
-            }
-          } catch (error) {
-            console.error('Error generating AI class insights:', error.message);
-          }
-        }
+        insights.averageConfidence = Math.round(avgConfidence);
       }
 
-      // Add general recommendations based on risk distribution
-      if (analysis.summary.highRisk > 0) {
-        insights.recommendations.push(`${analysis.summary.highRisk} students need immediate intervention`);
+      // Add Random Forest specific recommendations
+      if (badPerformancePredictions > 0) {
+        insights.recommendations.push(`Focus on ${badPerformancePredictions} students predicted to struggle`);
       }
       
       if (analysis.summary.mediumRisk > 0) {
-        insights.recommendations.push(`${analysis.summary.mediumRisk} students need additional support`);
+        insights.recommendations.push(`Monitor ${analysis.summary.mediumRisk} students with uncertain predictions`);
       }
 
       return insights;
     } catch (error) {
       throw new Error(`Error generating class insights: ${error.message}`);
-    }
-  }
-
-  // New method: Analyze student feedback using Hugging Face
-  async analyzeStudentFeedback(feedbackText, studentId) {
-    if (!this.hfApiKey) {
-      return {
-        success: false,
-        message: 'Hugging Face API not configured'
-      };
-    }
-
-    try {
-      // Analyze sentiment
-      const sentiment = await this.analyzeFeedbackSentiment(feedbackText);
-      
-      // Extract key themes using text classification
-      const themes = await this.callHuggingFaceAPI(this.models.textClassification, {
-        inputs: feedbackText,
-        parameters: {
-          candidate_labels: [
-            "academic difficulty",
-            "motivation issues", 
-            "time management",
-            "subject confusion",
-            "positive feedback",
-            "improvement needed"
-          ]
-        }
-      });
-
-      return {
-        success: true,
-        studentId,
-        sentiment,
-        themes: themes.labels ? themes.labels.slice(0, 3) : [],
-        analysis: {
-          feedbackText,
-          analyzedAt: new Date(),
-          confidence: sentiment.confidence
-        }
-      };
-    } catch (error) {
-      console.error('Error analyzing student feedback:', error.message);
-      return {
-        success: false,
-        message: error.message
-      };
-    }
-  }
-
-  // New method: Generate personalized study plan using AI
-  async generateStudyPlan(studentId, targetGrade = 'B+') {
-    if (!this.hfApiKey) {
-      return {
-        success: false,
-        message: 'Hugging Face API not configured'
-      };
-    }
-
-    try {
-      const prediction = await this.predictStudentMarks(studentId);
-      if (!prediction.success) {
-        throw new Error('Could not generate prediction for study plan');
-      }
-
-      const prompt = `
-Create a personalized study plan for a student with the following profile:
-- Current Performance: ${prediction.prediction.predictedMarks}%
-- Current Grade: ${prediction.prediction.predictedGrade}
-- Target Grade: ${targetGrade}
-- Risk Level: ${prediction.prediction.riskLevel}
-- Attendance: ${prediction.dataUsed.attendancePercentage}%
-
-Generate a structured 4-week study plan with specific daily activities and goals.
-      `.trim();
-
-      const response = await this.callHuggingFaceAPI(this.models.textGeneration, {
-        inputs: prompt,
-        parameters: {
-          max_length: 300,
-          temperature: 0.7,
-          do_sample: true
-        }
-      });
-
-      let studyPlan = "Default study plan: Focus on weak subjects, improve attendance, and practice regularly.";
-      
-      if (response && response[0] && response[0].generated_text) {
-        studyPlan = response[0].generated_text.replace(prompt, '').trim();
-      }
-
-      return {
-        success: true,
-        studentId,
-        targetGrade,
-        currentPerformance: prediction.prediction.predictedMarks,
-        studyPlan,
-        generatedAt: new Date()
-      };
-    } catch (error) {
-      console.error('Error generating study plan:', error.message);
-      return {
-        success: false,
-        message: error.message
-      };
     }
   }
 }

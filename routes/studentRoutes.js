@@ -81,7 +81,7 @@ router.get("/stats/public", async (req, res) => {
   }
 });
 
-// Public route to get student counts by class and section
+// Public route to get student counts by class
 router.get("/counts/class-section", async (req, res) => {
   try {
     const counts = await Student.aggregate([
@@ -90,34 +90,31 @@ router.get("/counts/class-section", async (req, res) => {
       },
       {
         $group: {
-          _id: { class: '$class', section: '$section' },
+          _id: { class: '$class' },
           count: { $sum: 1 }
         }
       },
       {
-        $sort: { '_id.class': 1, '_id.section': 1 }
+        $sort: { '_id.class': 1 }
       }
     ]);
 
     // Transform the data into a more usable format
-    const classSectionCounts = {};
+    const classCounts = {};
     counts.forEach(item => {
-      const { class: cls, section } = item._id;
-      if (!classSectionCounts[cls]) {
-        classSectionCounts[cls] = {};
-      }
-      classSectionCounts[cls][section] = item.count;
+      const { class: cls } = item._id;
+      classCounts[cls] = item.count;
     });
 
     res.json({
       success: true,
-      data: classSectionCounts
+      data: classCounts
     });
   } catch (error) {
-    console.error("Error fetching class-section counts:", error);
+    console.error("Error fetching class counts:", error);
     res.status(500).json({
       success: false,
-      message: "Error fetching class-section counts",
+      message: "Error fetching class counts",
       error: error.message
     });
   }
@@ -126,12 +123,12 @@ router.get("/counts/class-section", async (req, res) => {
 // Public route to generate unique roll number
 router.post("/generate-rollnumber", async (req, res) => {
   try {
-    const { class: studentClass, section } = req.body;
+    const { class: studentClass } = req.body;
     
-    if (!studentClass || !section) {
+    if (!studentClass) {
       return res.status(400).json({
         success: false,
-        message: "Class and section are required"
+        message: "Class is required"
       });
     }
 
@@ -140,8 +137,8 @@ router.post("/generate-rollnumber", async (req, res) => {
     const maxAttempts = 10;
     
     do {
-      const randomNum = Math.floor(100 + Math.random() * 900);
-      rollNumber = `${studentClass}${section}${randomNum}`;
+      const randomNum = Math.floor(1000 + Math.random() * 9000);
+      rollNumber = `${studentClass}${randomNum}`;
       attempts++;
     } while (
       await Student.findOne({ rollNumber }) && 
@@ -179,7 +176,6 @@ router.get("/list/public", async (req, res) => {
     // Build filter object
     const filter = { status: 'active' };
     if (req.query.class) filter.class = req.query.class;
-    if (req.query.section) filter.section = req.query.section;
     if (req.query.search) {
       filter.$or = [
         { firstName: { $regex: req.query.search, $options: 'i' } },
@@ -193,7 +189,7 @@ router.get("/list/public", async (req, res) => {
       .sort({ rollNumber: 1 }) // Sort by roll number for attendance
       .skip(skip)
       .limit(limit)
-      .select('firstName lastName rollNumber class section email phone admissionDate status');
+      .select('firstName lastName rollNumber class email phone admissionDate status');
 
     const total = await Student.countDocuments(filter);
 
@@ -223,15 +219,15 @@ router.post("/register", async (req, res) => {
   try {
     // Auto-generate roll number if not provided or if it conflicts
     if (!req.body.rollNumber || req.body.rollNumber.includes('AUTO')) {
-      const { class: studentClass, section } = req.body;
-      if (studentClass && section) {
+      const { class: studentClass } = req.body;
+      if (studentClass) {
         let rollNumber;
         let attempts = 0;
         const maxAttempts = 10;
         
         do {
-          const randomNum = Math.floor(100 + Math.random() * 900);
-          rollNumber = `${studentClass}${section}${randomNum}`;
+          const randomNum = Math.floor(1000 + Math.random() * 9000);
+          rollNumber = `${studentClass}${randomNum}`;
           attempts++;
         } while (
           await Student.findOne({ rollNumber }) && 
@@ -457,7 +453,6 @@ router.get("/", authenticateToken, requireRole(['admin']), async (req, res) => {
     // Build filter object
     const filter = {};
     if (req.query.class) filter.class = req.query.class;
-    if (req.query.section) filter.section = req.query.section;
     if (req.query.status) filter.status = req.query.status;
     if (req.query.search) {
       filter.$or = [

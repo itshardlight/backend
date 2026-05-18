@@ -52,12 +52,7 @@ const resultSchema = new mongoose.Schema({
   class: {
     type: String,
     required: true,
-    enum: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
-  },
-  section: {
-    type: String,
-    required: true,
-    enum: ['A', 'B', 'C']
+    enum: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
   },
   examType: {
     type: String,
@@ -145,7 +140,7 @@ resultSchema.index({
 }, { unique: true });
 
 // Additional indexes for faster queries
-resultSchema.index({ class: 1, section: 1 });
+resultSchema.index({ class: 1 });
 resultSchema.index({ examType: 1, academicYear: 1 });
 resultSchema.index({ enteredBy: 1 });
 resultSchema.index({ status: 1 });

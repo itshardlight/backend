@@ -50,11 +50,7 @@ const profileSchema = new mongoose.Schema({
   academic: {
     currentGrade: {
       type: String,
-      enum: ["9", "10", "11", "12"]
-    },
-    section: {
-      type: String,
-      enum: ["A", "B", "C"]
+      enum: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
     },
     rollNumber: {
       type: String,
@@ -183,24 +179,19 @@ profileSchema.virtual('fullName').get(function() {
 
 // Virtual for current class display
 profileSchema.virtual('currentClass').get(function() {
-  if (this.academic.currentGrade && this.academic.section) {
-    return `${this.academic.currentGrade}-${this.academic.section}`;
-  }
-  return null;
+  return this.academic?.currentGrade || null;
 });
 
 // Auto-generate roll number before saving
 profileSchema.pre('save', async function(next) {
-  if (this.isNew && this.academic.currentGrade && this.academic.section && !this.academic.rollNumber) {
+  if (this.isNew && this.academic.currentGrade && !this.academic.rollNumber) {
     const year = new Date().getFullYear().toString().slice(-2);
     const grade = this.academic.currentGrade;
-    const section = this.academic.section;
     
-    // Find the highest roll number for this grade and section
+    // Find the highest roll number for this grade
     const lastStudent = await this.constructor.findOne({
       "academic.currentGrade": grade,
-      "academic.section": section,
-      "academic.rollNumber": { $regex: `^${year}${grade}${section}` }
+      "academic.rollNumber": { $regex: `^${year}${grade}` }
     }).sort({ "academic.rollNumber": -1 });
     
     let nextNumber = 1;
@@ -209,7 +200,7 @@ profileSchema.pre('save', async function(next) {
       nextNumber = lastNumber + 1;
     }
     
-    this.academic.rollNumber = `${year}${grade}${section}${nextNumber.toString().padStart(3, '0')}`;
+    this.academic.rollNumber = `${year}${grade}${nextNumber.toString().padStart(3, '0')}`;
   }
   next();
 });

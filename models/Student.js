@@ -59,12 +59,7 @@ const studentSchema = new mongoose.Schema({
   class: {
     type: String,
     required: true,
-    enum: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
-  },
-  section: {
-    type: String,
-    required: true,
-    enum: ["A", "B", "C"]
+    enum: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
   },
   rollNumber: {
     type: String,
@@ -152,8 +147,8 @@ const studentSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Create compound index for class and section
-studentSchema.index({ class: 1, section: 1 });
+// Index for class-based queries
+studentSchema.index({ class: 1 });
 
 // Additional indexes for faster searches (unique indexes are already created above)
 // studentSchema.index({ rollNumber: 1 }); // Already unique
@@ -162,11 +157,6 @@ studentSchema.index({ class: 1, section: 1 });
 // Virtual for full name
 studentSchema.virtual('fullName').get(function() {
   return `${this.firstName} ${this.lastName}`;
-});
-
-// Virtual for class-section display
-studentSchema.virtual('classSection').get(function() {
-  return `${this.class}-${this.section}`;
 });
 
 // Update lastUpdated before saving

@@ -1,4 +1,5 @@
 import express from "express";
+import mongoose from "mongoose";
 import Attendance from "../models/Attendance.js";
 import Student from "../models/Student.js";
 import User from "../models/User.js";
@@ -6,605 +7,595 @@ import { authenticateToken, requireRole } from "../middleware/auth.js";
 
 const router = express.Router();
 
+// ── helpers ────────────────────────────────────────────────────────────────────
 
+/** Return a Date set to 00:00:00.000 UTC for the given date value */
+const toMidnight = (d) => {
+  const dt = new Date(d);
+  dt.setHours(0, 0, 0, 0);
+  return dt;
+};
 
-// Get attendance for a specific student by student ID (admin/teacher access)
-router.get("/student/:studentId", authenticateToken, requireRole(['admin', 'teacher']), async (req, res) => {
-  try {
-    const { studentId } = req.params;
-    const { startDate, endDate, subject } = req.query;
-    
-    // Find the student record
-    const student = await Student.findById(studentId);
-    if (!student) {
-      return res.status(404).json({
-        success: false,
-        message: "Student not found"
-      });
-    }
+const VALID_STATUSES = ["present", "absent", "late", "excused"];
 
-    // Set default date range if not provided (last 30 days)
-    const defaultEndDate = new Date();
-    const defaultStartDate = new Date();
-    defaultStartDate.setDate(defaultStartDate.getDate() - 30);
-
-    // Build filter
-    const filter = { 
-      studentId: student._id,
-      date: {
-        $gte: new Date(startDate || defaultStartDate),
-        $lte: new Date(endDate || defaultEndDate)
-      }
-    };
-    
-    if (subject) {
-      filter.subject = subject;
-    }
-
-    // Get attendance records
-    const records = await Attendance.find(filter)
-      .sort({ date: -1, period: 1 })
-      .populate('markedBy', 'fullName username')
-      .lean();
-
-    // Get summary using the model's static method
-    const summary = await Attendance.getStudentSummary(
-      student._id,
-      filter.date.$gte,
-      filter.date.$lte
-    );
-
-    // Get subject-wise summary
-    const subjectSummary = await Attendance.getSubjectSummary(
-      student._id,
-      filter.date.$gte,
-      filter.date.$lte
-    );
-
-    // Format records for frontend
-    const formattedRecords = records.map(record => ({
-      date: record.date,
-      subject: record.subject,
-      period: record.period,
-      status: record.status,
-      timeIn: record.timeIn,
-      timeOut: record.timeOut,
-      remarks: record.remarks,
-      markedBy: record.markedBy?.fullName || 'System',
-      markedAt: record.markedAt
-    }));
-
-    res.json({
-      success: true,
-      data: {
-        summary,
-        subjectSummary,
-        records: formattedRecords,
-        student: {
-          name: student.fullName,
-          rollNumber: student.rollNumber,
-          class: student.class,
-          section: student.section
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error("Error fetching student attendance:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching attendance data",
-      error: error.message
-    });
-  }
+/** Format a raw Attendance document for API responses */
+const formatRecord = (record) => ({
+  _id:       record._id,
+  date:      record.date,
+  status:    record.status,
+  remarks:   record.remarks || "",
+  markedBy:  record.markedBy?.fullName || record.markedBy?.username || "System",
+  markedAt:  record.markedAt
 });
 
-// Get attendance for a specific student (student can view their own)
+// ── GET /student/:studentId  (admin | teacher | parent) ───────────────────────
+// Admin/teacher can view any student. Parent can only view their own child.
+router.get(
+  "/student/:studentId",
+  authenticateToken,
+  requireRole(["admin", "teacher", "parent"]),
+  async (req, res) => {
+    try {
+      const { studentId } = req.params;
+      const { startDate, endDate } = req.query;
+
+      // Validate studentId format
+      if (!mongoose.Types.ObjectId.isValid(studentId)) {
+        return res.status(400).json({ success: false, message: "Invalid student ID" });
+      }
+
+      const student = await Student.findById(studentId);
+      if (!student) {
+        return res.status(404).json({ success: false, message: "Student not found" });
+      }
+
+      // Parents may only view their own child's attendance
+      if (req.user.role === "parent") {
+        const isChild = student.guardianEmail === req.user.email ||
+                        (student.userId && student.userId.toString() !== req.user._id.toString());
+        // More reliable: check if the parent's user email matches the student's guardian email
+        if (student.guardianEmail !== req.user.email) {
+          return res.status(403).json({
+            success: false,
+            message: "You can only view your own child's attendance"
+          });
+        }
+      }
+
+      const defaultEnd   = new Date();
+      const defaultStart = new Date();
+      defaultStart.setDate(defaultStart.getDate() - 30);
+
+      const dateFrom = startDate ? new Date(startDate) : defaultStart;
+      const dateTo   = endDate   ? new Date(endDate)   : defaultEnd;
+
+      if (isNaN(dateFrom) || isNaN(dateTo)) {
+        return res.status(400).json({ success: false, message: "Invalid date format" });
+      }
+
+      const records = await Attendance.find({
+        studentId: student._id,
+        date: { $gte: dateFrom, $lte: dateTo }
+      })
+        .sort({ date: -1 })
+        .populate("markedBy", "fullName username")
+        .lean();
+
+      const summary = await Attendance.getStudentSummary(student._id, dateFrom, dateTo);
+
+      res.json({
+        success: true,
+        data: {
+          summary,
+          records: records.map(formatRecord),
+          student: {
+            name:       student.fullName,
+            rollNumber: student.rollNumber,
+            class:      student.class,
+            section:    student.section
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error("Error fetching student attendance:", error);
+      res.status(500).json({ success: false, message: "Error fetching attendance data", error: error.message });
+    }
+  }
+);
+
+// ── GET /my-attendance  (student | parent) ────────────────────────────────────
+// Students see their own attendance. Parents see their child's attendance.
 router.get("/my-attendance", authenticateToken, async (req, res) => {
   try {
-    const userId = req.user._id;
-    const { startDate, endDate, subject } = req.query;
-    
-    // Find the student record for this user
-    let student = await Student.findOne({ userId });
-    
-    // Fallback: try to find by email if userId not found
-    if (!student) {
-      student = await Student.findOne({ email: req.user.email });
-      
-      // If found, update the student record with userId for future queries
-      if (student && !student.userId) {
-        student.userId = userId;
-        await student.save();
-      }
-    }
-    
-    if (!student) {
-      return res.status(404).json({
+    const { startDate, endDate } = req.query;
+    const role = req.user.role;
+
+    if (!["student", "parent"].includes(role)) {
+      return res.status(403).json({
         success: false,
-        message: "Student record not found for this user"
+        message: "This endpoint is for students and parents only"
       });
     }
 
-    // Set default date range if not provided (last 30 days)
-    const defaultEndDate = new Date();
-    const defaultStartDate = new Date();
-    defaultStartDate.setDate(defaultStartDate.getDate() - 30);
+    // ── Resolve the student record ─────────────────────────────────────────────
+    let student = null;
 
-    // Build filter
-    const filter = { 
-      studentId: student._id,
-      date: {
-        $gte: new Date(startDate || defaultStartDate),
-        $lte: new Date(endDate || defaultEndDate)
+    if (role === "student") {
+      // Try by userId first, fall back to email
+      student = await Student.findOne({ userId: req.user._id });
+      if (!student) {
+        student = await Student.findOne({ email: req.user.email });
+        if (student && !student.userId) {
+          student.userId = req.user._id;
+          await student.save();
+        }
       }
-    };
-    
-    if (subject) {
-      filter.subject = subject;
+    } else {
+      // Parent: find the child whose guardianEmail matches the parent's email
+      student = await Student.findOne({ guardianEmail: req.user.email });
     }
 
-    // Get attendance records
-    const records = await Attendance.find(filter)
-      .sort({ date: -1, period: 1 })
-      .populate('markedBy', 'fullName username')
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: role === "parent"
+          ? "No student record found linked to your account"
+          : "Student record not found for this user"
+      });
+    }
+
+    const defaultEnd   = new Date();
+    const defaultStart = new Date();
+    defaultStart.setDate(defaultStart.getDate() - 30);
+
+    const dateFrom = startDate ? new Date(startDate) : defaultStart;
+    const dateTo   = endDate   ? new Date(endDate)   : defaultEnd;
+
+    if (isNaN(dateFrom) || isNaN(dateTo)) {
+      return res.status(400).json({ success: false, message: "Invalid date format" });
+    }
+
+    const records = await Attendance.find({
+      studentId: student._id,
+      date: { $gte: dateFrom, $lte: dateTo }
+    })
+      .sort({ date: -1 })
+      .populate("markedBy", "fullName username")
       .lean();
 
-    // Get summary using the model's static method
-    const summary = await Attendance.getStudentSummary(
-      student._id,
-      filter.date.$gte,
-      filter.date.$lte
-    );
-
-    // Get subject-wise summary
-    const subjectSummary = await Attendance.getSubjectSummary(
-      student._id,
-      filter.date.$gte,
-      filter.date.$lte
-    );
-
-    // Format records for frontend
-    const formattedRecords = records.map(record => ({
-      date: record.date,
-      subject: record.subject,
-      period: record.period,
-      status: record.status,
-      timeIn: record.timeIn,
-      timeOut: record.timeOut,
-      remarks: record.remarks,
-      markedBy: record.markedBy?.fullName || 'System',
-      markedAt: record.markedAt
-    }));
+    const summary = await Attendance.getStudentSummary(student._id, dateFrom, dateTo);
 
     res.json({
       success: true,
       data: {
         summary,
-        subjectSummary,
-        records: formattedRecords,
+        records: records.map(formatRecord),
         student: {
-          name: student.fullName,
+          name:       student.fullName,
           rollNumber: student.rollNumber,
-          class: student.class,
-          section: student.section
+          class:      student.class,
+          section:    student.section
         }
       }
     });
 
   } catch (error) {
-    console.error("Error fetching student attendance:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching attendance data",
-      error: error.message
-    });
+    console.error("Error fetching attendance:", error);
+    res.status(500).json({ success: false, message: "Error fetching attendance data", error: error.message });
   }
 });
 
-// Get attendance for all students (teachers/admin)
-router.get("/class/:class/:section", authenticateToken, requireRole(['admin', 'teacher']), async (req, res) => {
-  try {
-    const { class: studentClass, section } = req.params;
-    const { date, subject, period, startDate, endDate } = req.query;
-    
-    // Handle date range queries for history
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      
-      // Get all students in this class
-      const students = await Student.find({ 
-        class: studentClass, 
-        section, 
-        status: 'active' 
+// ── GET /class/:class/:section  (admin | teacher) ─────────────────────────────
+router.get(
+  "/class/:class/:section",
+  authenticateToken,
+  requireRole(["admin", "teacher"]),
+  async (req, res) => {
+    try {
+      const { class: studentClass } = req.params;
+      const { date, startDate, endDate } = req.query;
+
+      // Validate class and section
+      const validClasses  = ["1","2","3","4","5","6","7","8","9","10"];
+      const validSections = ["A","B","C"];
+      if (!validClasses.includes(studentClass)) {
+        return res.status(400).json({ success: false, message: "Invalid class value" });
+      }
+      if (!validSections.includes(section)) {
+        return res.status(400).json({ success: false, message: "Invalid section value" });
+      }
+
+      // ── History view (date range) ────────────────────────────────────────────
+      if (startDate && endDate) {
+        const start = toMidnight(startDate);
+        const end   = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+
+        if (isNaN(start) || isNaN(end)) {
+          return res.status(400).json({ success: false, message: "Invalid date format" });
+        }
+
+        const attendanceRecords = await Attendance.find({
+          class: studentClass,
+          section,
+          date: { $gte: start, $lte: end }
+        })
+          .populate("studentId", "firstName lastName rollNumber")
+          .populate("markedBy",  "fullName username")
+          .sort({ date: -1 })
+          .lean();
+
+        const historyData = attendanceRecords
+          .filter(r => r.studentId) // guard against orphaned records
+          .map(record => ({
+            date:        record.date,
+            studentName: `${record.studentId.firstName} ${record.studentId.lastName}`,
+            rollNumber:  record.studentId.rollNumber,
+            status:      record.status,
+            remarks:     record.remarks || "",
+            markedAt:    record.markedAt,
+            markedBy:    record.markedBy?.fullName || record.markedBy?.username || "System"
+          }));
+
+        return res.json({
+          success: true,
+          data: {
+            class:        studentClass,
+            section,
+            dateRange:    { startDate: start, endDate: end },
+            history:      historyData,
+            totalRecords: historyData.length
+          }
+        });
+      }
+
+      // ── Single-day view ──────────────────────────────────────────────────────
+      const targetDate = date ? toMidnight(date) : toMidnight(new Date());
+      if (isNaN(targetDate)) {
+        return res.status(400).json({ success: false, message: "Invalid date format" });
+      }
+
+      const students = await Student.find({
+        class: studentClass,
+        section,
+        status: "active"
       }).sort({ rollNumber: 1 });
 
-      // Get all attendance records in the date range
+      if (students.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            class: studentClass, section,
+            date: targetDate,
+            students: [],
+            summary: { total: 0, present: 0, absent: 0, late: 0, excused: 0, not_marked: 0 }
+          }
+        });
+      }
+
+      const nextDay = new Date(targetDate.getTime() + 24 * 60 * 60 * 1000);
       const attendanceRecords = await Attendance.find({
         class: studentClass,
         section,
-        date: { $gte: start, $lte: end }
+        date: { $gte: targetDate, $lt: nextDay }
       })
-      .populate('studentId', 'firstName lastName rollNumber')
-      .populate('markedBy', 'fullName username')
-      .sort({ date: -1, period: 1 })
-      .lean();
+        .populate("studentId", "firstName lastName rollNumber")
+        .lean();
 
-      // Format the response for history view
-      const historyData = attendanceRecords.map(record => ({
-        date: record.date,
-        subject: record.subject,
-        period: record.period,
-        studentName: record.studentId.firstName + ' ' + record.studentId.lastName,
-        rollNumber: record.studentId.rollNumber,
-        status: record.status,
-        timeIn: record.timeIn,
-        markedAt: record.markedAt,
-        markedBy: record.markedBy?.fullName
-      }));
-
-      return res.json({
-        success: true,
-        data: {
-          class: studentClass,
-          section,
-          dateRange: { startDate: start, endDate: end },
-          history: historyData,
-          totalRecords: historyData.length
+      // Build a map keyed by studentId string
+      const attendanceMap = {};
+      attendanceRecords.forEach(record => {
+        if (record.studentId) {
+          attendanceMap[record.studentId._id.toString()] = record;
         }
       });
-    }
-    
-    // Handle single date queries (existing functionality)
-    const targetDate = date ? new Date(date) : new Date();
-    targetDate.setHours(0, 0, 0, 0);
-    
-    // Get all students in this class
-    const students = await Student.find({ 
-      class: studentClass, 
-      section, 
-      status: 'active' 
-    }).sort({ rollNumber: 1 });
 
-    if (students.length === 0) {
-      return res.json({
-        success: true,
-        data: {
-          students: [],
-          attendance: [],
-          summary: { total: 0, present: 0, absent: 0, late: 0, excused: 0 }
-        }
+      const responseData = students.map(student => {
+        const record = attendanceMap[student._id.toString()];
+        return {
+          student: {
+            _id:        student._id,
+            name:       student.fullName,
+            rollNumber: student.rollNumber,
+            email:      student.email
+          },
+          attendance: record || null,
+          status:     record ? record.status : "not_marked"
+        };
       });
-    }
 
-    // Build attendance filter
-    const attendanceFilter = {
-      class: studentClass,
-      section,
-      date: {
-        $gte: targetDate,
-        $lt: new Date(targetDate.getTime() + 24 * 60 * 60 * 1000)
-      }
-    };
-
-    if (subject) attendanceFilter.subject = subject;
-    if (period) attendanceFilter.period = period;
-
-    // Get existing attendance records
-    const attendanceRecords = await Attendance.find(attendanceFilter)
-      .populate('studentId', 'firstName lastName rollNumber')
-      .populate('markedBy', 'fullName username')
-      .lean();
-
-    // Create attendance map
-    const attendanceMap = {};
-    attendanceRecords.forEach(record => {
-      const key = `${record.studentId._id}_${record.subject}_${record.period}`;
-      attendanceMap[key] = record;
-    });
-
-    // Prepare response data
-    const responseData = students.map(student => {
-      const key = `${student._id}_${subject || 'default'}_${period || '1'}`;
-      const attendanceRecord = attendanceMap[key];
-      
-      return {
-        student: {
-          _id: student._id,
-          name: student.fullName,
-          rollNumber: student.rollNumber,
-          email: student.email
-        },
-        attendance: attendanceRecord || null,
-        status: attendanceRecord ? attendanceRecord.status : 'not_marked'
+      const summary = {
+        total:      students.length,
+        present:    attendanceRecords.filter(r => r.status === "present").length,
+        absent:     attendanceRecords.filter(r => r.status === "absent").length,
+        late:       attendanceRecords.filter(r => r.status === "late").length,
+        excused:    attendanceRecords.filter(r => r.status === "excused").length,
+        not_marked: students.length - attendanceRecords.length
       };
-    });
 
-    // Calculate summary
-    const summary = {
-      total: students.length,
-      present: attendanceRecords.filter(r => r.status === 'present').length,
-      absent: attendanceRecords.filter(r => r.status === 'absent').length,
-      late: attendanceRecords.filter(r => r.status === 'late').length,
-      excused: attendanceRecords.filter(r => r.status === 'excused').length,
-      not_marked: students.length - attendanceRecords.length
-    };
-
-    res.json({
-      success: true,
-      data: {
-        class: studentClass,
-        section,
-        date: targetDate,
-        subject,
-        period,
-        students: responseData,
-        summary
-      }
-    });
-
-  } catch (error) {
-    console.error("Error fetching class attendance:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching class attendance",
-      error: error.message
-    });
-  }
-});
-
-// Mark attendance for multiple students
-router.post("/mark-attendance", authenticateToken, requireRole(['admin', 'teacher']), async (req, res) => {
-  try {
-    const { class: studentClass, section, date, subject, period, attendanceData } = req.body;
-    const markedBy = req.user._id;
-
-    if (!studentClass || !section || !date || !subject || !period || !attendanceData) {
-      return res.status(400).json({
-        success: false,
-        message: "All fields are required: class, section, date, subject, period, attendanceData"
+      res.json({
+        success: true,
+        data: { class: studentClass, section, date: targetDate, students: responseData, summary }
       });
+
+    } catch (error) {
+      console.error("Error fetching class attendance:", error);
+      res.status(500).json({ success: false, message: "Error fetching class attendance", error: error.message });
     }
+  }
+);
 
-    const targetDate = new Date(date);
-    const results = [];
-    const errors = [];
+// ── POST /mark-attendance  (admin | teacher) ──────────────────────────────────
+router.post(
+  "/mark-attendance",
+  authenticateToken,
+  requireRole(["admin", "teacher"]),
+  async (req, res) => {
+    try {
+      const { class: studentClass, section, date, attendanceData } = req.body;
+      const markedBy = req.user._id;
 
-    for (const item of attendanceData) {
-      try {
-        const { studentId, status, timeIn, timeOut, remarks } = item;
-
-        // Verify student exists and belongs to the class
-        const student = await Student.findOne({
-          _id: studentId,
-          class: studentClass,
-          section,
-          status: 'active'
+      // ── Input validation ─────────────────────────────────────────────────────
+      if (!studentClass || !section || !date) {
+        return res.status(400).json({
+          success: false,
+          message: "class, section, and date are required"
         });
+      }
 
-        if (!student) {
-          errors.push(`Student ${studentId} not found or not in class ${studentClass}-${section}`);
-          continue;
-        }
+      if (!Array.isArray(attendanceData) || attendanceData.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "attendanceData must be a non-empty array"
+        });
+      }
 
-        // Ensure student has userId (for legacy records)
-        if (!student.userId) {
-          const User = (await import("../models/User.js")).default;
-          const user = await User.findOne({ email: student.email });
-          if (user) {
-            student.userId = user._id;
-            await student.save();
-          } else {
-            errors.push(`Student ${student.firstName} ${student.lastName} has no linked user account`);
+      const validClasses  = ["1","2","3","4","5","6","7","8","9","10"];
+      const validSections = ["A","B","C"];
+      if (!validClasses.includes(studentClass)) {
+        return res.status(400).json({ success: false, message: "Invalid class value" });
+      }
+      if (!validSections.includes(section)) {
+        return res.status(400).json({ success: false, message: "Invalid section value" });
+      }
+
+      const targetDate = toMidnight(date);
+      if (isNaN(targetDate)) {
+        return res.status(400).json({ success: false, message: "Invalid date format" });
+      }
+
+      // Reject future dates
+      if (targetDate > toMidnight(new Date())) {
+        return res.status(400).json({ success: false, message: "Cannot mark attendance for a future date" });
+      }
+
+      const results = [];
+      const errors  = [];
+
+      for (const item of attendanceData) {
+        try {
+          const { studentId, status, remarks } = item;
+
+          // Validate studentId
+          if (!studentId || !mongoose.Types.ObjectId.isValid(studentId)) {
+            errors.push(`Invalid studentId: ${studentId}`);
             continue;
           }
+
+          // Validate status
+          if (!status || !VALID_STATUSES.includes(status)) {
+            errors.push(`Invalid status "${status}" for student ${studentId}. Must be one of: ${VALID_STATUSES.join(", ")}`);
+            continue;
+          }
+
+          // Verify student belongs to this class/section and is active
+          const student = await Student.findOne({
+            _id: studentId,
+            class: studentClass,
+            section,
+            status: "active"
+          });
+
+          if (!student) {
+            errors.push(`Student ${studentId} not found or not active in class ${studentClass}-${section}`);
+            continue;
+          }
+
+          // Resolve userId if missing (link legacy records)
+          if (!student.userId) {
+            const linkedUser = await User.findOne({ email: student.email });
+            if (linkedUser) {
+              student.userId = linkedUser._id;
+              await student.save();
+            }
+            // userId is now optional — we proceed even without it
+          }
+
+          // Upsert: one record per student per day
+          const filter = { studentId: student._id, date: targetDate };
+
+          const update = {
+            $set: {
+              class:         studentClass,
+              section,
+              status,
+              remarks:       remarks || "",
+              markedBy,
+              markedAt:      new Date(),
+              lastUpdatedBy: markedBy
+            },
+            // Only set userId and studentId on first insert
+            $setOnInsert: {
+              studentId: student._id,
+              userId:    student.userId || undefined,
+              date:      targetDate
+            }
+          };
+
+          const attendanceRecord = await Attendance.findOneAndUpdate(
+            filter,
+            update,
+            { upsert: true, new: true, runValidators: true }
+          ).populate("studentId", "firstName lastName rollNumber");
+
+          results.push({
+            studentId,
+            studentName: `${attendanceRecord.studentId.firstName} ${attendanceRecord.studentId.lastName}`,
+            rollNumber:  attendanceRecord.studentId.rollNumber,
+            status,
+            success: true
+          });
+
+        } catch (err) {
+          errors.push(`Error for student ${item.studentId}: ${err.message}`);
         }
-
-        // Find or create attendance record
-        const filter = {
-          studentId,
-          userId: student.userId,
-          date: targetDate,
-          subject,
-          period
-        };
-
-        const updateData = {
-          class: studentClass,
-          section,
-          status,
-          markedBy,
-          markedAt: new Date(),
-          lastUpdatedBy: markedBy
-        };
-
-        if (timeIn) updateData.timeIn = new Date(timeIn);
-        if (timeOut) updateData.timeOut = new Date(timeOut);
-        if (remarks) updateData.remarks = remarks;
-
-        const attendanceRecord = await Attendance.findOneAndUpdate(
-          filter,
-          updateData,
-          { upsert: true, new: true, runValidators: true }
-        ).populate('studentId', 'firstName lastName rollNumber');
-
-        results.push({
-          studentId,
-          studentName: attendanceRecord.studentId.fullName,
-          rollNumber: attendanceRecord.studentId.rollNumber,
-          status,
-          success: true
-        });
-
-      } catch (error) {
-        errors.push(`Error marking attendance for student ${item.studentId}: ${error.message}`);
       }
-    }
 
-    res.json({
-      success: errors.length === 0,
-      message: errors.length === 0 ? 
-        `Attendance marked successfully for ${results.length} students` :
-        `Attendance marked for ${results.length} students with ${errors.length} errors`,
-      data: {
-        successful: results,
-        errors
-      }
-    });
-
-  } catch (error) {
-    console.error("Mark attendance error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error marking attendance",
-      error: error.message
-    });
-  }
-});
-
-// Update single attendance record
-router.put("/update/:attendanceId", authenticateToken, requireRole(['admin', 'teacher']), async (req, res) => {
-  try {
-    const { attendanceId } = req.params;
-    const { status, timeIn, timeOut, remarks } = req.body;
-    const lastUpdatedBy = req.user._id;
-
-    const updateData = {
-      lastUpdatedBy,
-      markedAt: new Date()
-    };
-
-    if (status) updateData.status = status;
-    if (timeIn) updateData.timeIn = new Date(timeIn);
-    if (timeOut) updateData.timeOut = new Date(timeOut);
-    if (remarks !== undefined) updateData.remarks = remarks;
-
-    const attendanceRecord = await Attendance.findByIdAndUpdate(
-      attendanceId,
-      updateData,
-      { new: true, runValidators: true }
-    ).populate('studentId', 'firstName lastName rollNumber')
-     .populate('markedBy', 'fullName username');
-
-    if (!attendanceRecord) {
-      return res.status(404).json({
-        success: false,
-        message: "Attendance record not found"
+      res.json({
+        success: errors.length === 0,
+        message: errors.length === 0
+          ? `Attendance marked for ${results.length} student(s)`
+          : `Marked ${results.length} student(s) with ${errors.length} error(s)`,
+        data: { successful: results, errors }
       });
+
+    } catch (error) {
+      console.error("Mark attendance error:", error);
+      res.status(500).json({ success: false, message: "Error marking attendance", error: error.message });
     }
-
-    res.json({
-      success: true,
-      message: "Attendance updated successfully",
-      data: attendanceRecord
-    });
-
-  } catch (error) {
-    console.error("Error updating attendance:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error updating attendance",
-      error: error.message
-    });
   }
-});
+);
 
-// Get attendance statistics for admin dashboard
-router.get("/stats/overview", authenticateToken, requireRole(['admin', 'teacher']), async (req, res) => {
-  try {
-    const { startDate, endDate, class: studentClass, section } = req.query;
-    
-    const dateFilter = {};
-    if (startDate && endDate) {
-      dateFilter.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
+// ── PUT /update/:attendanceId  (admin | teacher) ──────────────────────────────
+router.put(
+  "/update/:attendanceId",
+  authenticateToken,
+  requireRole(["admin", "teacher"]),
+  async (req, res) => {
+    try {
+      const { attendanceId } = req.params;
+      const { status, remarks } = req.body;
+
+      if (!mongoose.Types.ObjectId.isValid(attendanceId)) {
+        return res.status(400).json({ success: false, message: "Invalid attendance ID" });
+      }
+
+      if (status && !VALID_STATUSES.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`
+        });
+      }
+
+      const updateData = {
+        lastUpdatedBy: req.user._id,
+        markedAt:      new Date()
       };
-    } else {
-      // Default to current month
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      dateFilter.date = { $gte: startOfMonth, $lte: endOfMonth };
+      if (status)              updateData.status  = status;
+      if (remarks !== undefined) updateData.remarks = remarks;
+
+      const attendanceRecord = await Attendance.findByIdAndUpdate(
+        attendanceId,
+        updateData,
+        { new: true, runValidators: true }
+      )
+        .populate("studentId", "firstName lastName rollNumber")
+        .populate("markedBy",  "fullName username");
+
+      if (!attendanceRecord) {
+        return res.status(404).json({ success: false, message: "Attendance record not found" });
+      }
+
+      res.json({ success: true, message: "Attendance updated successfully", data: attendanceRecord });
+
+    } catch (error) {
+      console.error("Error updating attendance:", error);
+      res.status(500).json({ success: false, message: "Error updating attendance", error: error.message });
     }
-
-    const matchFilter = { ...dateFilter };
-    if (studentClass) matchFilter.class = studentClass;
-    if (section) matchFilter.section = section;
-
-    // Overall statistics
-    const overallStats = await Attendance.aggregate([
-      { $match: matchFilter },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: 1 },
-          present: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
-          absent: { $sum: { $cond: [{ $eq: ["$status", "absent"] }, 1, 0] } },
-          late: { $sum: { $cond: [{ $eq: ["$status", "late"] }, 1, 0] } },
-          excused: { $sum: { $cond: [{ $eq: ["$status", "excused"] }, 1, 0] } }
-        }
-      },
-      {
-        $addFields: {
-          attendanceRate: {
-            $round: [
-              { $multiply: [{ $divide: ["$present", "$total"] }, 100] },
-              2
-            ]
-          }
-        }
-      }
-    ]);
-
-    // Class-wise statistics
-    const classStats = await Attendance.aggregate([
-      { $match: matchFilter },
-      {
-        $group: {
-          _id: { class: "$class", section: "$section" },
-          total: { $sum: 1 },
-          present: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
-          absent: { $sum: { $cond: [{ $eq: ["$status", "absent"] }, 1, 0] } },
-          late: { $sum: { $cond: [{ $eq: ["$status", "late"] }, 1, 0] } }
-        }
-      },
-      {
-        $addFields: {
-          attendanceRate: {
-            $round: [
-              { $multiply: [{ $divide: ["$present", "$total"] }, 100] },
-              2
-            ]
-          }
-        }
-      },
-      { $sort: { "_id.class": 1, "_id.section": 1 } }
-    ]);
-
-    res.json({
-      success: true,
-      data: {
-        overall: overallStats[0] || { total: 0, present: 0, absent: 0, late: 0, excused: 0, attendanceRate: 0 },
-        byClass: classStats,
-        period: {
-          startDate: matchFilter.date.$gte,
-          endDate: matchFilter.date.$lte
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error("Error fetching attendance statistics:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching attendance statistics",
-      error: error.message
-    });
   }
-});
+);
+
+// ── GET /stats/overview  (admin | teacher) ────────────────────────────────────
+router.get(
+  "/stats/overview",
+  authenticateToken,
+  requireRole(["admin", "teacher"]),
+  async (req, res) => {
+    try {
+      const { startDate, endDate, class: studentClass, section } = req.query;
+
+      let dateRange;
+      if (startDate && endDate) {
+        dateRange = { $gte: new Date(startDate), $lte: new Date(endDate) };
+      } else {
+        const now          = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth   = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        dateRange = { $gte: startOfMonth, $lte: endOfMonth };
+      }
+
+      const matchFilter = { date: dateRange };
+      if (studentClass) matchFilter.class   = studentClass;
+      if (section)      matchFilter.section = section;
+
+      const overallStats = await Attendance.aggregate([
+        { $match: matchFilter },
+        {
+          $group: {
+            _id:     null,
+            total:   { $sum: 1 },
+            present: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
+            absent:  { $sum: { $cond: [{ $eq: ["$status", "absent"]  }, 1, 0] } },
+            late:    { $sum: { $cond: [{ $eq: ["$status", "late"]    }, 1, 0] } },
+            excused: { $sum: { $cond: [{ $eq: ["$status", "excused"] }, 1, 0] } }
+          }
+        },
+        {
+          $addFields: {
+            attendanceRate: {
+              $round: [{ $multiply: [{ $divide: ["$present", "$total"] }, 100] }, 2]
+            }
+          }
+        }
+      ]);
+
+      const classStats = await Attendance.aggregate([
+        { $match: matchFilter },
+        {
+          $group: {
+            _id:     { class: "$class", section: "$section" },
+            total:   { $sum: 1 },
+            present: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
+            absent:  { $sum: { $cond: [{ $eq: ["$status", "absent"]  }, 1, 0] } },
+            late:    { $sum: { $cond: [{ $eq: ["$status", "late"]    }, 1, 0] } }
+          }
+        },
+        {
+          $addFields: {
+            attendanceRate: {
+              $round: [{ $multiply: [{ $divide: ["$present", "$total"] }, 100] }, 2]
+            }
+          }
+        },
+        { $sort: { "_id.class": 1, "_id.section": 1 } }
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          overall:  overallStats[0] || { total: 0, present: 0, absent: 0, late: 0, excused: 0, attendanceRate: 0 },
+          byClass:  classStats,
+          period:   { startDate: dateRange.$gte, endDate: dateRange.$lte }
+        }
+      });
+
+    } catch (error) {
+      console.error("Error fetching attendance statistics:", error);
+      res.status(500).json({ success: false, message: "Error fetching attendance statistics", error: error.message });
+    }
+  }
+);
 
 export default router;
+

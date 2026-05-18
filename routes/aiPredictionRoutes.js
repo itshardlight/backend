@@ -58,10 +58,44 @@ router.get('/student/:studentId', authenticateToken, requireAdmin, async (req, r
   }
 });
 
+// GET /api/ai-predictions/available-classes - Get available class/section combinations
+router.get('/available-classes', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const Student = (await import('../models/Student.js')).default;
+    
+    const classCombinations = await Student.aggregate([
+      { $match: { status: 'active' } },
+      { $group: { _id: { class: '$class', section: '$section' }, count: { $sum: 1 } } },
+      { $sort: { '_id.class': 1, '_id.section': 1 } }
+    ]);
+    
+    const availableClasses = classCombinations.map(c => ({
+      class: c._id.class,
+      section: c._id.section,
+      studentCount: c.count
+    }));
+    
+    res.json({
+      success: true,
+      data: {
+        combinations: availableClasses,
+        totalStudents: classCombinations.reduce((sum, c) => sum + c.count, 0)
+      }
+    });
+  } catch (error) {
+    console.error('Error getting available classes:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching available classes',
+      error: error.message
+    });
+  }
+});
+
 // GET /api/ai-predictions/analyze-class - Analyze all students or specific class
 router.get('/analyze-class', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { class: className, section, limit } = req.query;
+    const { class: className, section, limit, includeFailures } = req.query;
     
     const filters = {};
     if (className) filters.class = className;
@@ -69,6 +103,62 @@ router.get('/analyze-class', authenticateToken, requireAdmin, async (req, res) =
     if (limit) filters.limit = parseInt(limit);
     
     const analysis = await aiPredictionService.analyzeAllStudents(filters);
+    
+    // If includeFailures is requested, get details about students who couldn't be analyzed
+    if (includeFailures === 'true' && analysis.summary.noData > 0) {
+      const Student = (await import('../models/Student.js')).default;
+      const Result = (await import('../models/Result.js')).default;
+      
+      // Get all students in the class
+      const studentFilter = { status: 'active' };
+      if (className) studentFilter.class = className;
+      if (section) studentFilter.section = section;
+      
+      const allStudents = await Student.find(studentFilter);
+      
+      // Find students who were analyzed successfully
+      const analyzedStudentIds = [
+        ...analysis.weakStudents,
+        ...analysis.atRiskStudents,
+        ...analysis.averagePerformers,
+        ...analysis.strongPerformers
+      ].map(s => s.student.id);
+      
+      // Find students who couldn't be analyzed
+      const failedStudents = allStudents.filter(s => !analyzedStudentIds.includes(s._id.toString()));
+      
+      // Get failure reasons for each student
+      const failureDetails = [];
+      for (const student of failedStudents) {
+        const results = await Result.find({ 
+          studentId: student._id,
+          status: { $in: ['published', 'verified', 'locked'] }
+        });
+        
+        let reason = 'Unknown';
+        if (results.length === 0) {
+          reason = 'No published exam results found';
+        } else if (results.length < 3) {
+          reason = `Only ${results.length} exam results (need at least 3)`;
+        } else {
+          reason = 'Prediction algorithm failed';
+        }
+        
+        failureDetails.push({
+          student: {
+            id: student._id,
+            name: `${student.firstName} ${student.lastName}`,
+            rollNumber: student.rollNumber,
+            class: student.class,
+            section: student.section
+          },
+          reason: reason,
+          resultCount: results.length
+        });
+      }
+      
+      analysis.failureDetails = failureDetails;
+    }
     
     res.json({
       success: true,
@@ -79,6 +169,49 @@ router.get('/analyze-class', authenticateToken, requireAdmin, async (req, res) =
     res.status(500).json({
       success: false,
       message: 'Error analyzing class performance',
+      error: error.message
+    });
+  }
+});
+
+// POST /api/ai-predictions/fix-results-status - Fix draft results to published status
+router.post('/fix-results-status', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { class: className, section } = req.body;
+    
+    if (!className || !section) {
+      return res.status(400).json({
+        success: false,
+        message: 'Class and section are required'
+      });
+    }
+    
+    const Result = (await import('../models/Result.js')).default;
+    
+    // Find draft results for the specified class
+    const updateResult = await Result.updateMany(
+      { 
+        class: className, 
+        section: section, 
+        status: 'draft' 
+      },
+      { 
+        $set: { status: 'published' } 
+      }
+    );
+    
+    res.json({
+      success: true,
+      data: {
+        modifiedCount: updateResult.modifiedCount,
+        message: `Updated ${updateResult.modifiedCount} draft results to published status`
+      }
+    });
+  } catch (error) {
+    console.error('Error fixing results status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fixing results status',
       error: error.message
     });
   }

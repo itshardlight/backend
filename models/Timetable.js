@@ -5,12 +5,7 @@ const timetableSchema = new mongoose.Schema({
   class: {
     type: String,
     required: true,
-    enum: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
-  },
-  section: {
-    type: String,
-    required: true,
-    enum: ["A", "B", "C", "D"]
+    enum: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
   },
   
   // Schedule Information
@@ -79,7 +74,7 @@ const timetableSchema = new mongoose.Schema({
 });
 
 // Compound index for efficient queries
-timetableSchema.index({ class: 1, section: 1, dayOfWeek: 1, period: 1, isActive: 1 }, { 
+timetableSchema.index({ class: 1, dayOfWeek: 1, period: 1, isActive: 1 }, { 
   unique: true,
   partialFilterExpression: { isActive: true }
 });
