@@ -61,6 +61,12 @@ const studentSchema = new mongoose.Schema({
     required: true,
     enum: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
   },
+  section: {
+    type: String,
+    required: true,
+    enum: ["A", "B", "C"],
+    trim: true
+  },
   rollNumber: {
     type: String,
     required: true,
@@ -148,7 +154,7 @@ const studentSchema = new mongoose.Schema({
 });
 
 // Index for class-based queries
-studentSchema.index({ class: 1 });
+studentSchema.index({ class: 1, section: 1 });
 
 // Additional indexes for faster searches (unique indexes are already created above)
 // studentSchema.index({ rollNumber: 1 }); // Already unique
