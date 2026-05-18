@@ -819,17 +819,48 @@ router.delete("/:id", authenticateToken, requireRole(['admin']), async (req, res
       });
     }
 
-    // Delete associated user account if it exists
+    // Import related models
+    const Profile = (await import("../models/Profile.js")).default;
+    const Attendance = (await import("../models/Attendance.js")).default;
+    const Payment = (await import("../models/Payment.js")).default;
+    const Result = (await import("../models/Result.js")).default;
+
+    // Delete all related records in parallel
+    const deletionPromises = [
+      Student.findByIdAndDelete(req.params.id)
+    ];
+
+    // Delete associated user account and profile if they exist
     if (student.userId) {
-      await User.findByIdAndDelete(student.userId);
+      deletionPromises.push(
+        User.findByIdAndDelete(student.userId),
+        Profile.deleteOne({ userId: student.userId })
+      );
     }
 
-    // Delete the student record
-    await Student.findByIdAndDelete(req.params.id);
+    // Delete attendance, payment, and result records
+    deletionPromises.push(
+      Attendance.deleteMany({ studentId: student._id }),
+      Payment.deleteMany({ studentId: student._id }),
+      Result.deleteMany({ studentId: student._id })
+    );
+
+    // If userId exists, also delete records by userId
+    if (student.userId) {
+      deletionPromises.push(
+        Attendance.deleteMany({ userId: student.userId }),
+        Payment.deleteMany({ userId: student.userId })
+      );
+    }
+
+    // Execute all deletions
+    await Promise.all(deletionPromises);
+
+    console.log(`✅ Deleted student ${student._id} and all related records`);
 
     res.json({
       success: true,
-      message: "Student and associated user account deleted successfully"
+      message: "Student and all associated records deleted successfully (user account, profile, attendance, payments, results)"
     });
   } catch (error) {
     console.error("Error deleting student:", error);

@@ -136,11 +136,45 @@ router.post("/delete-user", isAdmin, async (req, res) => {
       });
     }
 
+    // Import related models
+    const Student = (await import("../models/Student.js")).default;
+    const Profile = (await import("../models/Profile.js")).default;
+    const Attendance = (await import("../models/Attendance.js")).default;
+    const Payment = (await import("../models/Payment.js")).default;
+    const Result = (await import("../models/Result.js")).default;
+
+    // If user is a student, delete all related records
+    if (user.role === "student") {
+      // Find the student record
+      const student = await Student.findOne({ userId: targetUserId });
+      
+      if (student) {
+        // Delete all related records
+        await Promise.all([
+          Profile.deleteOne({ userId: targetUserId }),
+          Attendance.deleteMany({ studentId: student._id }),
+          Attendance.deleteMany({ userId: targetUserId }),
+          Payment.deleteMany({ studentId: student._id }),
+          Payment.deleteMany({ userId: targetUserId }),
+          Result.deleteMany({ studentId: student._id }),
+          Student.findByIdAndDelete(student._id)
+        ]);
+
+        console.log(`✅ Deleted student ${student._id} and all related records`);
+      }
+    } else {
+      // For non-student users, just delete their profile if it exists
+      await Profile.deleteOne({ userId: targetUserId });
+    }
+
+    // Delete the user account
     await User.findByIdAndDelete(targetUserId);
 
     res.json({
       success: true,
-      message: "User deleted successfully"
+      message: user.role === "student" 
+        ? "User and all related student records deleted successfully"
+        : "User deleted successfully"
     });
   } catch (error) {
     console.error("❌ Delete user error:", error);
