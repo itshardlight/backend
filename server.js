@@ -12,6 +12,7 @@ import resultRoutes from "./routes/resultRoutes.js";
 import feeRoutes from "./routes/feeRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 import timetableRoutes from "./routes/timetableRoutes.js";
+import aiPredictionRoutes from "./routes/aiPredictionRoutes.js";
 
 dotenv.config();
 
@@ -41,6 +42,7 @@ app.use("/api/results", resultRoutes);
 app.use("/api/fees", feeRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/timetable", timetableRoutes);
+app.use("/api/ai-predictions", aiPredictionRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

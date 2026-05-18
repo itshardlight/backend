@@ -17,7 +17,7 @@ const timetableSchema = new mongoose.Schema({
   dayOfWeek: {
     type: String,
     required: true,
-    enum: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+    enum: ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday"]
   },
   period: {
     type: String,

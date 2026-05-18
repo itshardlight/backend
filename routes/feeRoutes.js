@@ -133,7 +133,7 @@ router.get('/students', authenticateToken, requireFeeOrAdmin, async (req, res) =
         const totalFee = feeInfo.totalFee || 0;
         const paidAmount = feeInfo.paidAmount || 0;
         const pendingAmount = totalFee - paidAmount;
-        dd 
+        
         switch (paymentStatus) {
           case 'paid':
             return pendingAmount <= 0 && totalFee > 0;
