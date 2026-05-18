@@ -85,7 +85,7 @@ router.post("/", authenticateToken, requireAdminOrTeacher, async (req, res) => {
     console.log('Body:', req.body);
     console.log('User:', req.user.fullName, req.user.role);
     
-    const { _id, class: className, section, dayOfWeek, period, subject, startTime, endTime, room } = req.body;
+    const { _id, class: className, section, dayOfWeek, period, subject, startTime, endTime } = req.body;
 
     // Simple validation
     if (!className || !section || !dayOfWeek || !period || !subject || !startTime || !endTime) {
@@ -112,7 +112,6 @@ router.post("/", authenticateToken, requireAdminOrTeacher, async (req, res) => {
       existingEntry.subject = subject;
       existingEntry.startTime = startTime;
       existingEntry.endTime = endTime;
-      existingEntry.room = room || '';
       existingEntry.updatedBy = req.user._id;
 
       const updatedEntry = await existingEntry.save();
@@ -141,7 +140,6 @@ router.post("/", authenticateToken, requireAdminOrTeacher, async (req, res) => {
       existingSlot.subject = subject;
       existingSlot.startTime = startTime;
       existingSlot.endTime = endTime;
-      existingSlot.room = room || '';
       existingSlot.updatedBy = req.user._id;
 
       const updatedEntry = await existingSlot.save();
@@ -165,7 +163,6 @@ router.post("/", authenticateToken, requireAdminOrTeacher, async (req, res) => {
       subject: subject,
       startTime: startTime,
       endTime: endTime,
-      room: room || '',
       createdBy: req.user._id,
       isActive: true
     });
@@ -193,6 +190,118 @@ router.post("/", authenticateToken, requireAdminOrTeacher, async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Save failed: " + error.message
+    });
+  }
+});
+
+// Bulk save timetable entries
+router.post("/bulk", authenticateToken, requireAdminOrTeacher, async (req, res) => {
+  try {
+    console.log('=== BULK TIMETABLE SAVE ===');
+    console.log('User:', req.user.fullName, req.user.role);
+    console.log('Number of entries:', req.body.entries?.length);
+    
+    const { entries } = req.body;
+
+    if (!entries || !Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No entries provided"
+      });
+    }
+
+    const results = {
+      created: 0,
+      updated: 0,
+      failed: 0,
+      errors: []
+    };
+
+    // Process each entry
+    for (const entry of entries) {
+      try {
+        const { _id, class: className, section, dayOfWeek, period, subject, startTime, endTime } = entry;
+
+        // Validate required fields
+        if (!className || !section || !dayOfWeek || !period || !subject || !startTime || !endTime) {
+          results.failed++;
+          results.errors.push({
+            entry,
+            error: 'Missing required fields'
+          });
+          continue;
+        }
+
+        // If _id is provided, update existing entry
+        if (_id) {
+          const existingEntry = await Timetable.findById(_id);
+          if (existingEntry) {
+            existingEntry.subject = subject;
+            existingEntry.startTime = startTime;
+            existingEntry.endTime = endTime;
+            existingEntry.updatedBy = req.user._id;
+            await existingEntry.save();
+            results.updated++;
+            continue;
+          }
+        }
+
+        // Check for existing entry at this slot
+        const existingSlot = await Timetable.findOne({
+          class: className,
+          section: section,
+          dayOfWeek: dayOfWeek,
+          period: period,
+          isActive: true
+        });
+
+        if (existingSlot) {
+          // Update existing slot
+          existingSlot.subject = subject;
+          existingSlot.startTime = startTime;
+          existingSlot.endTime = endTime;
+          existingSlot.updatedBy = req.user._id;
+          await existingSlot.save();
+          results.updated++;
+        } else {
+          // Create new entry
+          const newEntry = new Timetable({
+            class: className,
+            section: section,
+            dayOfWeek: dayOfWeek,
+            period: period,
+            subject: subject,
+            startTime: startTime,
+            endTime: endTime,
+            createdBy: req.user._id,
+            isActive: true
+          });
+          await newEntry.save();
+          results.created++;
+        }
+      } catch (entryError) {
+        console.error('Error processing entry:', entryError);
+        results.failed++;
+        results.errors.push({
+          entry,
+          error: entryError.message
+        });
+      }
+    }
+
+    console.log('Bulk save results:', results);
+
+    res.json({
+      success: true,
+      message: `Bulk save completed: ${results.created} created, ${results.updated} updated, ${results.failed} failed`,
+      data: results
+    });
+    
+  } catch (error) {
+    console.error("Bulk save error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Bulk save failed: " + error.message
     });
   }
 });
@@ -232,7 +341,7 @@ router.get("/teacher/:teacherId", authenticateToken, async (req, res) => {
 router.put("/:id", authenticateToken, requireAdminOrTeacher, async (req, res) => {
   try {
     const { id } = req.params;
-    const { subject, startTime, endTime, room, teacherId, teacherName } = req.body;
+    const { subject, startTime, endTime, teacherId, teacherName } = req.body;
 
     const entry = await Timetable.findById(id);
     if (!entry) {
@@ -246,7 +355,6 @@ router.put("/:id", authenticateToken, requireAdminOrTeacher, async (req, res) =>
     if (subject) entry.subject = subject;
     if (startTime) entry.startTime = startTime;
     if (endTime) entry.endTime = endTime;
-    if (room !== undefined) entry.room = room;
     if (teacherId) entry.teacherId = teacherId;
     if (teacherName) entry.teacherName = teacherName;
     
