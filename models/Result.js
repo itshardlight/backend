@@ -113,12 +113,6 @@ const resultSchema = new mongoose.Schema({
     trim: true,
     default: ''
   },
-  attendance: {
-    type: Number,
-    min: 0,
-    max: 100,
-    default: 100
-  },
   verifiedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

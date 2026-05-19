@@ -392,16 +392,15 @@ router.post('/', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
       studentClass,
       studentSection,
       subjects,
-      remarks,
-      attendance
+      remarks
     } = req.body;
 
     // Validate required fields
-    if (!studentId || !examType || !examName || !academicYear || !subjects || subjects.length === 0) {
+    if (!studentId || !examType || !examName || !academicYear || !studentClass || !studentSection || !subjects || subjects.length === 0) {
       console.log('Validation failed - missing required fields');
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: studentId, examType, examName, academicYear, and subjects are required'
+        message: 'Missing required fields: studentId, examType, examName, academicYear, studentClass, studentSection, and subjects are required'
       });
     }
 
@@ -447,7 +446,6 @@ router.post('/', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
       academicYear,
       subjects,
       remarks: remarks || '',
-      attendance: attendance || 100,
       enteredBy: req.user._id,
       teacherName: teacher.fullName || teacher.username,
       status: 'draft'
