@@ -59,11 +59,6 @@ const resultSchema = new mongoose.Schema({
     required: true,
     enum: ['unit_test_1', 'unit_test_2', 'mid_term', 'final_term', 'annual', 'quarterly', 'half_yearly']
   },
-  examName: {
-    type: String,
-    required: true,
-    trim: true
-  },
   academicYear: {
     type: String,
     required: true,
@@ -193,7 +188,7 @@ resultSchema.virtual('studentName').get(function() {
 
 // Virtual for formatted exam display
 resultSchema.virtual('examDisplay').get(function() {
-  return `${this.examName} (${this.examType.replace('_', ' ').toUpperCase()})`;
+  return this.examType.replace('_', ' ').toUpperCase();
 });
 
 // Ensure virtuals are included in JSON output

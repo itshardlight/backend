@@ -7,7 +7,9 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "create-admin": "node scripts/createAdmin.js",
-    "cleanup-payments": "node scripts/cleanupPayments.js"
+    "cleanup-payments": "node scripts/cleanupPayments.js",
+    "seed": "node scripts/seedDummyData.js",
+    "clear-data": "node scripts/clearDummyData.js"
   },
   "keywords": [],
   "author": "",
