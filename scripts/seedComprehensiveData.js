@@ -357,9 +357,11 @@ const seedData = async () => {
               teacherName
             );
             
-            if (results.length > 0) {
-              await Result.insertMany(results);
-              totalResults += results.length;
+            // Save results individually to trigger pre-save middleware
+            for (const resultData of results) {
+              const result = new Result(resultData);
+              await result.save();
+              totalResults++;
             }
             
             process.stdout.write(`  ✓ Student ${i + 1}/${STUDENTS_PER_CLASS_SECTION} created\r`);

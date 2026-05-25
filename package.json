@@ -10,6 +10,7 @@
     "cleanup-payments": "node scripts/cleanupPayments.js",
     "seed": "node scripts/seedDummyData.js",
     "seed-comprehensive": "node scripts/seedComprehensiveData.js",
+    "fix-results": "node scripts/fixResults.js",
     "clear-data": "node scripts/clearDummyData.js"
   },
   "keywords": [],
