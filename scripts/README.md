@@ -4,7 +4,39 @@ This directory contains scripts to populate your database with dummy data for te
 
 ## Available Scripts
 
-### 1. Seed Dummy Data
+### 1. Seed Comprehensive Data (RECOMMENDED) ⭐
+**NEW:** Complete data seeding with students, attendance, and results.
+
+```bash
+node scripts/seedComprehensiveData.js
+```
+
+**What it creates:**
+- **~474 Students** (20 students per class-section × 3 sections × 10 classes)
+- **User Accounts** for each student with login credentials
+- **Complete Profiles** with fee information and payment history
+- **30 Days of Attendance** (weekdays only, realistic distribution)
+- **3 Exam Results** per student (Unit Test 1, Unit Test 2, Mid Term)
+- **Realistic Fee Data** with payment status and history
+
+**Student Login Credentials:**
+- Username format: `firstname.lastname` (e.g., `aarav.sharma`)
+- Password: `student123`
+- All accounts are verified and active
+
+**Features:**
+- ✅ 85% attendance rate (realistic distribution)
+- ✅ Marks range: 40-95% (varied performance)
+- ✅ Fee status: 70% partial/full paid, 30% pending
+- ✅ Complete parent/guardian information
+- ✅ Medical information included
+- ✅ Ready for AI predictions and analytics
+
+**See:** `DATA_SEEDING_SUMMARY.md` for detailed statistics
+
+---
+
+### 2. Seed Dummy Data (Legacy)
 Populates the database with comprehensive dummy data including:
 - **450 Students** (15 students per section × 3 sections × 10 classes)
 - **Student User Accounts** (login credentials for each student)

@@ -9,6 +9,7 @@
     "create-admin": "node scripts/createAdmin.js",
     "cleanup-payments": "node scripts/cleanupPayments.js",
     "seed": "node scripts/seedDummyData.js",
+    "seed-comprehensive": "node scripts/seedComprehensiveData.js",
     "clear-data": "node scripts/clearDummyData.js"
   },
   "keywords": [],
