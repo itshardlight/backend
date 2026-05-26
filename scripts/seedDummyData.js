@@ -308,7 +308,6 @@ const seedData = async () => {
                 subjects: subjectsWithMarks,
                 enteredBy: adminUser._id,
                 teacherName: adminUser.fullName,
-                status: 'published',
                 examDate
               });
 

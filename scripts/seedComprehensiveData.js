@@ -180,7 +180,6 @@ const generateResults = (studentId, rollNumber, classNum, teacherId, teacherName
       subjects: subjectResults,
       enteredBy: teacherId,
       teacherName,
-      status: 'published',
       remarks: 'Keep up the good work!'
     });
   }

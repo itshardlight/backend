@@ -131,8 +131,7 @@ router.get('/analyze-class', authenticateToken, requireAdmin, async (req, res) =
       const failureDetails = [];
       for (const student of failedStudents) {
         const results = await Result.find({ 
-          studentId: student._id,
-          status: { $in: ['published', 'verified', 'locked'] }
+          studentId: student._id
         });
         
         let reason = 'Unknown';
@@ -169,49 +168,6 @@ router.get('/analyze-class', authenticateToken, requireAdmin, async (req, res) =
     res.status(500).json({
       success: false,
       message: 'Error analyzing class performance',
-      error: error.message
-    });
-  }
-});
-
-// POST /api/ai-predictions/fix-results-status - Fix draft results to published status
-router.post('/fix-results-status', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const { class: className, section } = req.body;
-    
-    if (!className || !section) {
-      return res.status(400).json({
-        success: false,
-        message: 'Class and section are required'
-      });
-    }
-    
-    const Result = (await import('../models/Result.js')).default;
-    
-    // Find draft results for the specified class
-    const updateResult = await Result.updateMany(
-      { 
-        class: className, 
-        section: section, 
-        status: 'draft' 
-      },
-      { 
-        $set: { status: 'published' } 
-      }
-    );
-    
-    res.json({
-      success: true,
-      data: {
-        modifiedCount: updateResult.modifiedCount,
-        message: `Updated ${updateResult.modifiedCount} draft results to published status`
-      }
-    });
-  } catch (error) {
-    console.error('Error fixing results status:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fixing results status',
       error: error.message
     });
   }

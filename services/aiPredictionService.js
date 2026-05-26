@@ -322,8 +322,7 @@ class AIPredictionService {
       console.log(`Found student: ${student.firstName} ${student.lastName}`);
 
       const results = await Result.find({
-        studentId,
-        status: { $in: ['published', 'verified', 'locked'] }
+        studentId
       }).sort({ createdAt: 1 });
 
       const attendancePercentage = await this.calculateAttendancePercentage(studentId);
@@ -482,8 +481,7 @@ class AIPredictionService {
       console.log(`Calculating average marks for student: ${studentId}`);
 
       const results = await Result.find({
-        studentId,
-        status: { $in: ['published', 'verified', 'locked'] }
+        studentId
       }).sort({ createdAt: 1 });
 
       console.log(`Found ${results.length} results for student ${studentId}`);

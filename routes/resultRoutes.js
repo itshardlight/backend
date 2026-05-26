@@ -109,7 +109,6 @@ router.get('/', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
       section, 
       examType, 
       academicYear, 
-      status,
       studentId,
       page = 1,
       limit = 50
@@ -121,7 +120,6 @@ router.get('/', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
     if (section) filter.section = section;
     if (examType) filter.examType = examType;
     if (academicYear) filter.academicYear = academicYear;
-    if (status) filter.status = status;
     if (studentId) filter.studentId = studentId;
 
     // If user is teacher (not admin), only show their results
@@ -134,7 +132,6 @@ router.get('/', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
     const results = await Result.find(filter)
       .populate('studentId', 'firstName lastName rollNumber')
       .populate('enteredBy', 'fullName')
-      .populate('verifiedBy', 'fullName')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -175,8 +172,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
     const result = await Result.findById(id)
       .populate('studentId', 'firstName lastName rollNumber class section')
-      .populate('enteredBy', 'fullName')
-      .populate('verifiedBy', 'fullName');
+      .populate('enteredBy', 'fullName');
 
     if (!result) {
       return res.status(404).json({
@@ -296,12 +292,11 @@ router.get('/student/:studentId', authenticateToken, async (req, res) => {
 router.get('/class/:class/section/:section', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
   try {
     const { class: className, section } = req.params;
-    const { examType, academicYear, status } = req.query;
+    const { examType, academicYear } = req.query;
 
     const filter = { class: className, section };
     if (examType) filter.examType = examType;
     if (academicYear) filter.academicYear = academicYear;
-    if (status) filter.status = status;
 
     // Teachers can only view their own results
     if (req.user.role === 'teacher') {
@@ -360,7 +355,6 @@ router.get('/bulk-entry/:class/:section', authenticateToken, requireTeacherOrAdm
       return {
         ...student.toObject(),
         hasResult: !!existingResult,
-        resultStatus: existingResult?.status || null,
         existingResultId: existingResult?._id || null
       };
     });
@@ -445,8 +439,7 @@ router.post('/', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
       subjects,
       remarks: remarks || '',
       enteredBy: req.user._id,
-      teacherName: teacher.fullName || teacher.username,
-      status: 'draft'
+      teacherName: teacher.fullName || teacher.username
     });
 
     console.log('Saving result...');
@@ -504,14 +497,6 @@ router.put('/:id', authenticateToken, requireTeacherOrAdmin, async (req, res) =>
       });
     }
 
-    // Check if result is locked
-    if (result.status === 'locked') {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot update locked result'
-      });
-    }
-
     // Update the result
     Object.assign(result, updateData);
     await result.save();
@@ -536,102 +521,7 @@ router.put('/:id', authenticateToken, requireTeacherOrAdmin, async (req, res) =>
   }
 });
 
-// POST /api/results/:id/verify - Verify result (admin only)
-router.post('/:id/verify', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const result = await Result.findById(id);
-    if (!result) {
-      return res.status(404).json({
-        success: false,
-        message: 'Result not found'
-      });
-    }
-
-    if (result.status === 'locked') {
-      return res.status(400).json({
-        success: false,
-        message: 'Result is already locked'
-      });
-    }
-
-    result.status = 'verified';
-    result.verifiedBy = req.user._id;
-    result.verifiedAt = new Date();
-    await result.save();
-
-    const populatedResult = await Result.findById(result._id)
-      .populate('studentId', 'firstName lastName rollNumber')
-      .populate('enteredBy', 'fullName')
-      .populate('verifiedBy', 'fullName');
-
-    res.json({
-      success: true,
-      message: 'Result verified successfully',
-      data: populatedResult
-    });
-  } catch (error) {
-    console.error('Error verifying result:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error verifying result', 
-      error: error.message 
-    });
-  }
-});
-
-// POST /api/results/:id/publish - Publish result
-router.post('/:id/publish', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const result = await Result.findById(id);
-    if (!result) {
-      return res.status(404).json({
-        success: false,
-        message: 'Result not found'
-      });
-    }
-
-    // Check permissions
-    if (req.user.role === 'teacher' && result.enteredBy.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. You can only publish results you created.'
-      });
-    }
-
-    if (result.status === 'locked') {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot modify locked result'
-      });
-    }
-
-    result.status = 'published';
-    await result.save();
-
-    const populatedResult = await Result.findById(result._id)
-      .populate('studentId', 'firstName lastName rollNumber')
-      .populate('enteredBy', 'fullName');
-
-    res.json({
-      success: true,
-      message: 'Result published successfully',
-      data: populatedResult
-    });
-  } catch (error) {
-    console.error('Error publishing result:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error publishing result', 
-      error: error.message 
-    });
-  }
-});
-
-// DELETE /api/results/:id - Delete result (draft only)
+// DELETE /api/results/:id - Delete result
 router.delete('/:id', authenticateToken, requireTeacherOrAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -649,14 +539,6 @@ router.delete('/:id', authenticateToken, requireTeacherOrAdmin, async (req, res)
       return res.status(403).json({
         success: false,
         message: 'Access denied. You can only delete results you created.'
-      });
-    }
-
-    // Only allow deletion of draft results
-    if (result.status !== 'draft') {
-      return res.status(400).json({
-        success: false,
-        message: 'Only draft results can be deleted'
       });
     }
 
@@ -682,7 +564,7 @@ router.get('/analytics/class/:class/section/:section', authenticateToken, requir
     const { class: className, section } = req.params;
     const { examType, academicYear } = req.query;
 
-    const filter = { class: className, section, status: { $in: ['published', 'verified', 'locked'] } };
+    const filter = { class: className, section };
     if (examType) filter.examType = examType;
     if (academicYear) filter.academicYear = academicYear;
 

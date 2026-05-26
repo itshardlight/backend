@@ -98,24 +98,10 @@ const resultSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  status: {
-    type: String,
-    enum: ['draft', 'published', 'verified', 'locked'],
-    default: 'draft'
-  },
   remarks: {
     type: String,
     trim: true,
     default: ''
-  },
-  verifiedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null
-  },
-  verifiedAt: {
-    type: Date,
-    default: null
   }
 }, {
   timestamps: true
@@ -132,7 +118,6 @@ resultSchema.index({
 resultSchema.index({ class: 1 });
 resultSchema.index({ examType: 1, academicYear: 1 });
 resultSchema.index({ enteredBy: 1 });
-resultSchema.index({ status: 1 });
 
 // Calculate grade based on percentage
 function calculateGrade(percentage) {
