@@ -54,6 +54,10 @@ const resultSchema = new mongoose.Schema({
     required: true,
     enum: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
   },
+  section: {
+    type: String,
+    enum: ['A', 'B', 'C']
+  },
   examType: {
     type: String,
     required: true,

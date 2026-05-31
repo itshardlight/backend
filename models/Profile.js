@@ -52,6 +52,10 @@ const profileSchema = new mongoose.Schema({
       type: String,
       enum: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
     },
+    section: {
+      type: String,
+      enum: ["A", "B", "C"]
+    },
     rollNumber: {
       type: String,
       unique: true,

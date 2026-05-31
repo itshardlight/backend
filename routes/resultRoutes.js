@@ -42,16 +42,27 @@ router.get('/my-results', authenticateToken, async (req, res) => {
 
     const { academicYear, examType } = req.query;
 
-    // First try to find the student record using the old Student model
+    console.log('Fetching results for user:', req.user._id, 'role:', req.user.role);
+
+    // First try to find the student record using the Student model
     let student = await Student.findOne({ userId: req.user._id });
+    let studentIds = [];
     
-    // If not found in Student model, try to find in Profile model
-    if (!student) {
-      const Profile = mongoose.model('Profile');
-      const profile = await Profile.findOne({ userId: req.user._id });
+    if (student) {
+      console.log('Found Student record:', student._id);
+      studentIds.push(student._id);
+    }
+    
+    // Also check Profile model
+    const Profile = mongoose.model('Profile');
+    const profile = await Profile.findOne({ userId: req.user._id });
+    
+    if (profile) {
+      console.log('Found Profile record:', profile._id);
+      studentIds.push(profile._id);
       
-      if (profile) {
-        // Create a student-like object from profile data
+      // If we don't have a student object yet, create one from profile
+      if (!student) {
         student = {
           _id: profile._id,
           firstName: profile.firstName,
@@ -64,21 +75,28 @@ router.get('/my-results', authenticateToken, async (req, res) => {
     }
 
     if (!student) {
+      console.log('No Student or Profile record found for user:', req.user._id);
       return res.status(404).json({
         success: false,
-        message: 'Student record not found'
+        message: 'Student record not found. Please contact administration.'
       });
     }
 
-    // Build filter for student's results
-    const filter = { studentId: student._id };
+    // Build filter for student's results - search using both Student and Profile IDs
+    const filter = { 
+      studentId: { $in: studentIds }
+    };
     if (academicYear) filter.academicYear = academicYear;
     if (examType) filter.examType = examType;
 
+    console.log('Searching for results with filter:', JSON.stringify(filter));
+
     const results = await Result.find(filter)
-      .populate('enteredBy', 'fullName')
-      .populate('verifiedBy', 'fullName')
-      .sort({ examDate: -1, createdAt: -1 });
+      .populate('studentId', 'firstName lastName rollNumber class section')
+      .populate('enteredBy', 'fullName username')
+      .sort({ createdAt: -1 });
+
+    console.log('Found results:', results.length);
 
     res.json({
       success: true,
